@@ -2,7 +2,7 @@
 
 ##############################################################################
 # Script: poudriere_build.sh
-# Version: 1.13
+# Version: 1.14
 # Author: Karim Mansur
 # Description:
 #   - Automates package builds using Poudriere.
@@ -96,7 +96,7 @@ execute_build() {
   /usr/local/bin/poudriere ports -u -p "$PORTS_TREE" >> "$LOGFILE" 2>&1
 
   echo "[INFO] $(date) - Starting package build..." >> "$LOGFILE"
-  /usr/local/bin/poudriere bulk -j "$JAIL_NAME" -p "$PORTS_TREE" -f "$PKGLIST" >> "$LOGFILE" 2>&1
+  /usr/local/bin/poudriere bulk -j "$JAIL_NAME" -p "$PORTS_TREE" -f "$PKGLIST" -b latest >> "$LOGFILE" 2>&1
   BUILD_RESULT=$?
 
   if [ "$BUILD_RESULT" -eq 0 ]; then
