@@ -42,9 +42,6 @@ check_for_update() {
   rm -f "$TMPFILE"
 }
 
-# Check for script update
-check_for_update "$@"
-
 JAIL_NAME="systembase"
 PKGLIST_NAME="pkglist"
 LOG_RETENTION_DAYS=7
@@ -62,7 +59,9 @@ if [ "$1" != "--run-internal" ]; then
   exec lockf -k -t 0 "$LOCKFILE" "$0" --run-internal -j "$JAIL_NAME" -p "$PKGLIST_NAME" -l "$LOG_RETENTION_DAYS"
 fi
 
-# Reset parameters for internal execution
+# Internal execution starts here
+check_for_update "$@"
+
 shift
 while getopts "j:p:l:" opt; do
   case "$opt" in
