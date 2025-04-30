@@ -2,7 +2,7 @@
 
 ##############################################################################
 # Script: poudriere_build.sh
-# Version: 1.15
+# Version: 1.15a
 # Author: Karim Mansur
 # Description:
 #   - Automates package builds using Poudriere.
@@ -12,7 +12,7 @@
 #       -l <days>          : number of days to keep logs (default: 7)
 #       -h                 : show help message
 #   - Optional automatic script update (can be disabled with AUTOUPDATE=no).
-#   - Updates the ports tree, builds packages, sends report by email, cleans up.
+#   - Updates ports tree, builds packages, sends report by email, cleans up.
 ##############################################################################
 
 # Configurable variables
@@ -60,9 +60,10 @@ JAIL_NAME="systembase"
 PKGLIST_NAME="pkglist"
 LOG_RETENTION_DAYS=7
 
-# Parse initial options (outside lockf)
-while getopts "j:p:l:h" opt; do
+# Parse initial options (before lockf)
+while getopts "ij:p:l:h" opt; do
   case "$opt" in
+    i) ;;  # internal mode flag, just skip
     j) JAIL_NAME="$OPTARG" ;;
     p) PKGLIST_NAME="$OPTARG" ;;
     l) LOG_RETENTION_DAYS="$OPTARG" ;;
@@ -77,18 +78,19 @@ while getopts "j:p:l:h" opt; do
   esac
 done
 
-# Prevent duplicate execution using lockf
-if [ "$1" != "--run-internal" ]; then
+# Re-execute with lockf if not internal
+if [ "$1" != "-i" ]; then
   LOCKFILE="/tmp/poudriere_build_${JAIL_NAME}.lock"
-  exec lockf -k -t 0 "$LOCKFILE" "$0" --run-internal -j "$JAIL_NAME" -p "$PKGLIST_NAME" -l "$LOG_RETENTION_DAYS"
+  exec lockf -k -t 0 "$LOCKFILE" "$0" -i -j "$JAIL_NAME" -p "$PKGLIST_NAME" -l "$LOG_RETENTION_DAYS"
 fi
 
-# Internal execution starts here
-check_for_update "$@"
-
+# Shift internal mode flag
 shift
-while getopts "j:p:l:" opt; do
+
+# Re-parse inside internal execution
+while getopts "ij:p:l:" opt; do
   case "$opt" in
+    i) ;;  # internal mode
     j) JAIL_NAME="$OPTARG" ;;
     p) PKGLIST_NAME="$OPTARG" ;;
     l) LOG_RETENTION_DAYS="$OPTARG" ;;
@@ -107,6 +109,8 @@ if [ ! -f "$PKGLIST" ]; then
   echo "[ERROR] Package list file not found: $PKGLIST"
   exit 1
 fi
+
+check_for_update "$@"
 
 execute_build() {
   PIDS=$(pgrep -f "poudriere.*bulk.*-j $JAIL_NAME")
