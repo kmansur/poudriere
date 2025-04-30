@@ -2,28 +2,44 @@
 
 ##############################################################################
 # Script: poudriere_build.sh
-# Version: 1.14
+# Version: 1.15
 # Author: Karim Mansur
 # Description:
 #   - Automates package builds using Poudriere.
-#   - Checks for a new version of this script on GitHub before execution.
 #   - Supports parameters:
 #       -j <jail-name>     : jail name (default: systembase)
 #       -p <pkglist-name>  : package list file name (default: pkglist)
 #       -l <days>          : number of days to keep logs (default: 7)
-#   - Updates the ports tree, builds packages, sends a report by email, and cleans old packages.
-#   - Supports concurrent jail execution using lockf with controlled re-execution.
+#       -h                 : show help message
+#   - Optional automatic script update (can be disabled with AUTOUPDATE=no).
+#   - Updates the ports tree, builds packages, sends report by email, cleans up.
 ##############################################################################
 
 # Configurable variables
 EMAIL_RECIPIENT="monitor@domain.com.br"
-
+AUTOUPDATE="yes"  # Set to "no" to disable script self-update
 SCRIPT_URL="https://raw.githubusercontent.com/kmansur/poudriere/main/scripts/poudriere_build.sh"
 SCRIPT_PATH="$(realpath "$0")"
 
-check_for_update() {
-  TMPFILE=$(mktemp)
+show_help() {
+  cat <<EOF
+Usage: $0 [options]
 
+Options:
+  -j <jail>        Jail name (default: systembase)
+  -p <pkglist>     Package list name (default: pkglist)
+  -l <days>        Days to keep logs (default: 7)
+  -h               Show this help message
+
+Environment variables:
+  AUTOUPDATE=yes|no  Enable/disable automatic script update (default: yes)
+EOF
+}
+
+check_for_update() {
+  [ "$AUTOUPDATE" != "yes" ] && return
+
+  TMPFILE=$(mktemp)
   if fetch -q -o "$TMPFILE" "$SCRIPT_URL"; then
     if ! diff -q "$SCRIPT_PATH" "$TMPFILE" >/dev/null 2>&1; then
       echo "[INFO] Update detected. Updating the script..."
@@ -31,14 +47,12 @@ check_for_update() {
       chmod +x "$SCRIPT_PATH"
       echo "[INFO] Script updated. Restarting execution..."
       exec "$SCRIPT_PATH" "$@"
-      exit 0
     else
       echo "[INFO] No update available."
     fi
   else
     echo "[ERROR] Failed to check for script update."
   fi
-
   rm -f "$TMPFILE"
 }
 
@@ -46,15 +60,25 @@ JAIL_NAME="systembase"
 PKGLIST_NAME="pkglist"
 LOG_RETENTION_DAYS=7
 
-# Re-execute with lockf if not already in internal mode
+# Parse initial options (outside lockf)
+while getopts "j:p:l:h" opt; do
+  case "$opt" in
+    j) JAIL_NAME="$OPTARG" ;;
+    p) PKGLIST_NAME="$OPTARG" ;;
+    l) LOG_RETENTION_DAYS="$OPTARG" ;;
+    h)
+      show_help
+      exit 0
+      ;;
+    *)
+      show_help
+      exit 1
+      ;;
+  esac
+done
+
+# Prevent duplicate execution using lockf
 if [ "$1" != "--run-internal" ]; then
-  while getopts "j:p:l:" opt; do
-    case "$opt" in
-      j) JAIL_NAME="$OPTARG" ;;
-      p) PKGLIST_NAME="$OPTARG" ;;
-      l) LOG_RETENTION_DAYS="$OPTARG" ;;
-    esac
-  done
   LOCKFILE="/tmp/poudriere_build_${JAIL_NAME}.lock"
   exec lockf -k -t 0 "$LOCKFILE" "$0" --run-internal -j "$JAIL_NAME" -p "$PKGLIST_NAME" -l "$LOG_RETENTION_DAYS"
 fi
