@@ -64,7 +64,7 @@ chown nobody:nobody /var/cache/ccache
 chmod 755 /var/cache/ccache
 ```
 
-### 4.2 Configure `ccache.conf`
+### 4.2 Configure `/var/cache/ccache/ccache.conf`
 
 > Sets `ccache` operational parameters (e.g., size limit, compression, performance optimizations).
 
