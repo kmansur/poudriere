@@ -97,7 +97,7 @@ ln -s /var/cache/ccache/ccache.conf /usr/local/etc/ccache.conf
 ccache -s
 ```
 
-### 4.5 Enable in the Jail's `make.conf`
+### 4.5 Enable in the Jail's `/usr/local/etc/poudriere.d/make.conf`
 
 > Forces all ports compiled inside the jail to automatically use `ccache`.
 
