@@ -315,9 +315,19 @@ poudriere bulk -j 14-2-RELEASE-amd64 -p default -f /usr/local/etc/poudriere.d/14
 ```
 ---
 
-## 13. Automate with Cron
+## 13. Download script and automate with Cron
 
-> Automates the build process by running the script periodically without manual intervention.
+### 13.1. Download script
+
+```sh
+mkdir /usr/local/scripts
+cd /usr/local/scripts
+fetch https://raw.githubusercontent.com/kmansur/poudriere/main/scripts/poudriere_build.sh
+chmod 755 poudriere_build.sh
+```
+
+
+### 13.2. Automates the build process by running the script periodically without manual intervention.
 > 
 ```cron
 0 * * * * /usr/local/scripts/poudriere_build.sh
