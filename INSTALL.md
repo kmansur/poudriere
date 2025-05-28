@@ -230,18 +230,18 @@ http {
 
 ```
 
-Edit the file `/usr/local/etc/nginx/mime.types` and add the following line:
+Edit the file `/usr/local/etc/nginx/mime.types` and add the following line
 
 ```nginx
 text/plain    log;
 ```
-### 8.1. Create a directory for the SSL files (if it doesn’t already exist):
+### 8.1. Create a directory for the SSL files (if it doesn’t already exist)
 
 ```shell
 mkdir -p /usr/local/etc/nginx/ssl
 ```
 
-### 8.2. Generate the self-signed certificate and private key:
+### 8.2. Generate the self-signed certificate and private key
 
 Replace pkg.domain.com.br with your actual domain name.
 
@@ -252,19 +252,19 @@ openssl req -x509 -nodes -days 365 \
   -out /usr/local/etc/nginx/ssl/pkg.domain.com.br.pem \
   -subj "/C=BR/ST=State/L=City/O=Organization/CN=pkg.domain.com.br"
 ```
-### 8.3. Set appropriate permissions:
+### 8.3. Set appropriate permissions
 
 ``` shell
 chmod 600 /usr/local/etc/nginx/ssl/pkg.domain.com.br.*
 ```
 
-### 8.4. Test the NGINX configuration:
+### 8.4. Test the NGINX configuration
 
 ```shell
 nginx -t
 ```
 
-### 8.5. Reload NGINX to apply the changes:
+### 8.5. Reload NGINX to apply the changes
 
 ```shell
 service nginx reload
