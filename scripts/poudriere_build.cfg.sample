@@ -1,0 +1,19 @@
+# poudriere_build.cfg.sample
+# Sample configuration for poudriere_build.sh
+# Copy this file to poudriere_build.cfg and customize as needed.
+# This file will not be overwritten during script auto-updates.
+
+# Email recipient for build reports
+EMAIL_RECIPIENT="monitor@domain.com.br"
+
+# Enable or disable script auto-update (yes|no)
+AUTOUPDATE="yes"
+
+# Name of the jail to use for building packages
+JAIL_NAME="systembase"
+
+# Name of the package list file to use
+PKGLIST_NAME="pkglist"
+
+# Number of days to retain build logs
+LOG_RETENTION_DAYS=7

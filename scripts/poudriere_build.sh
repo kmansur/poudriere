@@ -2,37 +2,46 @@
 
 ##############################################################################
 # Script: poudriere_build.sh
-# Version: 1.15a
+# Version: 1.16
 # Author: Karim Mansur
 # Description:
 #   - Automates package builds using Poudriere.
-#   - Supports parameters:
-#       -j <jail-name>     : jail name (default: systembase)
-#       -p <pkglist-name>  : package list file name (default: pkglist)
-#       -l <days>          : number of days to keep logs (default: 7)
+#   - Supports external config file: ./poudriere_build.cfg
+#   - Script self-updates if AUTOUPDATE=yes.
+#   - Parameters:
+#       -j <jail-name>     : jail name (overrides config)
+#       -p <pkglist-name>  : package list file name (overrides config)
+#       -l <days>          : number of days to keep logs (overrides config)
 #       -h                 : show help message
-#   - Optional automatic script update (can be disabled with AUTOUPDATE=no).
-#   - Updates ports tree, builds packages, sends report by email, cleans up.
 ##############################################################################
 
-# Configurable variables
-EMAIL_RECIPIENT="monitor@domain.com.br"
-AUTOUPDATE="yes"  # Set to "no" to disable script self-update
+# Default script path and update URL
 SCRIPT_URL="https://raw.githubusercontent.com/kmansur/poudriere/main/scripts/poudriere_build.sh"
-SCRIPT_PATH="$(realpath "$0")"
+SCRIPT_PATH="/usr/local/scripts/poudriere_build.sh"
+
+# Load persistent configuration if present
+CONFIG_FILE="$(dirname "$SCRIPT_PATH")/poudriere_build.cfg"
+if [ -f "$CONFIG_FILE" ]; then
+  # shellcheck disable=SC1090
+  . "$CONFIG_FILE"
+fi
 
 show_help() {
   cat <<EOF
 Usage: $0 [options]
 
 Options:
-  -j <jail>        Jail name (default: systembase)
-  -p <pkglist>     Package list name (default: pkglist)
-  -l <days>        Days to keep logs (default: 7)
+  -j <jail>        Jail name (default from config)
+  -p <pkglist>     Package list name (default from config)
+  -l <days>        Days to keep logs (default from config)
   -h               Show this help message
 
-Environment variables:
-  AUTOUPDATE=yes|no  Enable/disable automatic script update (default: yes)
+Environment variables (from poudriere_build.cfg):
+  AUTOUPDATE=yes|no       Enable/disable automatic script update
+  EMAIL_RECIPIENT         Email recipient for build reports
+  JAIL_NAME               Jail name
+  PKGLIST_NAME            Package list file name
+  LOG_RETENTION_DAYS      Days to keep logs
 EOF
 }
 
@@ -56,14 +65,15 @@ check_for_update() {
   rm -f "$TMPFILE"
 }
 
-JAIL_NAME="systembase"
-PKGLIST_NAME="pkglist"
-LOG_RETENTION_DAYS=7
+# Default values (may be overridden by config or CLI)
+: "${JAIL_NAME:=systembase}"
+: "${PKGLIST_NAME:=pkglist}"
+: "${LOG_RETENTION_DAYS:=7}"
 
-# Parse initial options (before lockf)
+# Parse options
 while getopts "ij:p:l:h" opt; do
   case "$opt" in
-    i) ;;  # internal mode flag, just skip
+    i) ;;  # internal flag
     j) JAIL_NAME="$OPTARG" ;;
     p) PKGLIST_NAME="$OPTARG" ;;
     l) LOG_RETENTION_DAYS="$OPTARG" ;;
@@ -78,19 +88,18 @@ while getopts "ij:p:l:h" opt; do
   esac
 done
 
-# Re-execute with lockf if not internal
+# Locking
 if [ "$1" != "-i" ]; then
   LOCKFILE="/tmp/poudriere_build_${JAIL_NAME}.lock"
   exec lockf -k -t 0 "$LOCKFILE" "$0" -i -j "$JAIL_NAME" -p "$PKGLIST_NAME" -l "$LOG_RETENTION_DAYS"
 fi
 
-# Shift internal mode flag
 shift
 
-# Re-parse inside internal execution
+# Re-parse options inside lock
 while getopts "ij:p:l:" opt; do
   case "$opt" in
-    i) ;;  # internal mode
+    i) ;;
     j) JAIL_NAME="$OPTARG" ;;
     p) PKGLIST_NAME="$OPTARG" ;;
     l) LOG_RETENTION_DAYS="$OPTARG" ;;
