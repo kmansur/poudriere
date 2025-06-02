@@ -2,7 +2,7 @@
 
 ##############################################################################
 # Script: poudriere_build.sh
-# Version: 1.16
+# Version: 1.17
 # Author: Karim Mansur
 # Description:
 #   - Automates package builds using Poudriere.
@@ -17,7 +17,7 @@
 
 # Default script path and update URL
 SCRIPT_URL="https://raw.githubusercontent.com/kmansur/poudriere/main/scripts/poudriere_build.sh"
-SCRIPT_PATH="/usr/local/scripts/poudriere_build.sh"
+SCRIPT_PATH="$(realpath "$0")"
 
 # Load persistent configuration if present
 CONFIG_FILE="$(dirname "$SCRIPT_PATH")/poudriere_build.cfg"
@@ -25,6 +25,18 @@ if [ -f "$CONFIG_FILE" ]; then
   # shellcheck disable=SC1090
   . "$CONFIG_FILE"
 fi
+
+# Validate required variables
+: "${EMAIL_RECIPIENT:?EMAIL_RECIPIENT is not set. Check poudriere_build.cfg}"
+: "${JAIL_NAME:?JAIL_NAME is not set. Check poudriere_build.cfg}"
+: "${PKGLIST_NAME:?PKGLIST_NAME is not set. Check poudriere_build.cfg}"
+
+# Check if mail command is available
+command -v mail >/dev/null 2>&1 || {
+  echo "[ERROR] 'mail' command not found. Please install mailutils or bsd-mailx."
+  exit 1
+}
+
 
 show_help() {
   cat <<EOF
