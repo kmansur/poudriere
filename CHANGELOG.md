@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.18] – 2025-07-08
+### Added
+- Automatic update of the **Poudriere jail** as the first step of the build process:
+  - Added command: `/usr/local/bin/poudriere jail -u -j "$JAIL_NAME"`
+  - Ensures the jail is up to date before starting the package build.
+
 ## [1.17] - 2025-06-02
 ### Added
 - Validation for required variables: EMAIL_RECIPIENT, JAIL_NAME, and PKGLIST_NAME.

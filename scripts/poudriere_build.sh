@@ -2,7 +2,7 @@
 
 ##############################################################################
 # Script: poudriere_build.sh
-# Version: 1.17
+# Version: 1.18
 # Author: Karim Mansur
 # Description:
 #   - Automates package builds using Poudriere.
@@ -141,6 +141,8 @@ execute_build() {
     exit 1
   fi
 
+  echo "[INFO] $(date) - Updating jail $JAIL_NAME..." >> "$LOGFILE"
+  /usr/local/bin/poudriere jail -u -j "$JAIL_NAME" >> "$LOGFILE" 2>&1
   echo "[INFO] $(date) - Updating ports tree..." >> "$LOGFILE"
   /usr/local/bin/poudriere ports -u -p "$PORTS_TREE" >> "$LOGFILE" 2>&1
 
