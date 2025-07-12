@@ -19,25 +19,6 @@
 SCRIPT_URL="https://raw.githubusercontent.com/kmansur/poudriere/main/scripts/poudriere_build.sh"
 SCRIPT_PATH="$(realpath "$0")"
 
-# Load persistent configuration if present
-CONFIG_FILE="$(dirname "$SCRIPT_PATH")/poudriere_build.cfg"
-if [ -f "$CONFIG_FILE" ]; then
-  # shellcheck disable=SC1090
-  . "$CONFIG_FILE"
-fi
-
-# Validate required variables
-: "${EMAIL_RECIPIENT:?EMAIL_RECIPIENT is not set. Check poudriere_build.cfg}"
-: "${JAIL_NAME:?JAIL_NAME is not set. Check poudriere_build.cfg}"
-: "${PKGLIST_NAME:?PKGLIST_NAME is not set. Check poudriere_build.cfg}"
-
-# Check if mail command is available
-command -v mail >/dev/null 2>&1 || {
-  echo "[ERROR] 'mail' command not found. Please install mailutils or bsd-mailx."
-  exit 1
-}
-
-
 show_help() {
   cat <<EOF
 Usage: $0 [options]
@@ -55,6 +36,35 @@ Environment variables (from poudriere_build.cfg):
   PKGLIST_NAME            Package list file name
   LOG_RETENTION_DAYS      Days to keep logs
 EOF
+}
+
+# Load persistent configuration if present
+
+CONFIG_FILE="$(dirname "$SCRIPT_PATH")/poudriere_build.cfg"
+if [ -f "$CONFIG_FILE" ]; then
+  # shellcheck disable=SC1090
+  . "$CONFIG_FILE"
+fi
+
+# Show help early if requested
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help)
+      show_help
+      exit 0
+      ;;
+  esac
+done
+
+# Validate required variables
+: "${EMAIL_RECIPIENT:?EMAIL_RECIPIENT is not set. Check poudriere_build.cfg}"
+: "${JAIL_NAME:?JAIL_NAME is not set. Check poudriere_build.cfg}"
+: "${PKGLIST_NAME:?PKGLIST_NAME is not set. Check poudriere_build.cfg}"
+
+# Check if mail command is available
+command -v mail >/dev/null 2>&1 || {
+  echo "[ERROR] 'mail' command not found. Please install mailutils or bsd-mailx."
+  exit 1
 }
 
 check_for_update() {
