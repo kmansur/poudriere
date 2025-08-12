@@ -278,7 +278,7 @@ service nginx reload
 > The jail provides an isolated environment for package building; the ports tree provides the software source code structure.
 
 ```sh
-poudriere jail -c -j 14-2-RELEASE-amd64 -v 14.3-RELEASE
+poudriere jail -c -j 14-3-RELEASE-amd64 -v 14.3-RELEASE
 poudriere ports -c -p default
 ```
 
@@ -289,7 +289,7 @@ poudriere ports -c -p default
 > Keeps the jail environment and the ports collection updated with the latest security patches and software versions.
 
 ```sh
-poudriere jail -u -j 14-2-RELEASE-amd64
+poudriere jail -u -j 14-3-RELEASE-amd64
 poudriere ports -u -p default
 ```
 
@@ -298,7 +298,7 @@ poudriere ports -u -p default
 ## 11. Create the Package List
 
 > Defines which ports should be built automatically, improving build control and avoiding manual selections.
-> Create the file /usr/local/etc/poudriere.d/14-2-RELEASE-amd64-pkglist with the desired ports:
+> Create the file /usr/local/etc/poudriere.d/14-3-RELEASE-amd64-pkglist with the desired ports:
 
 ```
 ports-mgmt/pkg
@@ -312,7 +312,7 @@ sysutils/tmux
 > Manually triggers a bulk build to generate the package repository based on the jail and the selected ports tree.
 
 ```sh
-poudriere bulk -j 14-2-RELEASE-amd64 -p default -f /usr/local/etc/poudriere.d/14-2-RELEASE-amd64-pkglist
+poudriere bulk -j 14-3-RELEASE-amd64 -p default -f /usr/local/etc/poudriere.d/14-3-RELEASE-amd64-pkglist
 ```
 ---
 
@@ -360,7 +360,7 @@ Create or edit the file `/usr/local/etc/pkg/repos/poudriere.conf` with the follo
 
 ```conf
 poudriere: {
-  url: "https://pkg.domain.com.br/packages/14-2-RELEASE-amd64-default",
+  url: "https://pkg.domain.com.br/packages/14-3-RELEASE-amd64-default",
   mirror_type: "http",
   signature_type: "pubkey",
   pubkey: "/usr/local/etc/ssl/certs/poudriere.cert",
@@ -395,35 +395,35 @@ poudriere ports -l
 ### 16.3 Rebuild only a specific package
 
 ```sh
-poudriere bulk -j 14-2-RELEASE-amd64 print/texlive-texmf
+poudriere bulk -j 14-3-RELEASE-amd64 print/texlive-texmf
 ```
 
 ### 16.4 Configure or change build options for a port
 
 ```sh
-poudriere options -c -j 14-2-RELEASE-amd64 print/texlive-texmf
+poudriere options -c -j 14-3-RELEASE-amd64 print/texlive-texmf
 ```
 
 ### 16.5 Build using a list of packages
 
 ```sh
-poudriere bulk -j 14-2-RELEASE-amd64 -f /usr/local/etc/poudriere.d/14-2-RELEASE-amd64-pkglist
+poudriere bulk -j 14-3-RELEASE-amd64 -f /usr/local/etc/poudriere.d/14-3-RELEASE-amd64-pkglist
 ```
 
 ### 16.6 View logs from the latest builds
 
 ```sh
 # List recent builds
-poudriere status -j 14-2-RELEASE-amd64
+poudriere status -j 14-3-RELEASE-amd64
 
 # View errors from the latest build
-less /usr/local/poudriere/data/logs/bulk/14-2-RELEASE-amd64-default/latest/logs/errors/*
+less /usr/local/poudriere/data/logs/bulk/14-3-RELEASE-amd64-default/latest/logs/errors/*
 ```
 
 ### 16.7 Remove an existing jail
 
 ```sh
-poudriere jail -d -j 14-2-RELEASE-amd64
+poudriere jail -d -j 14-3-RELEASE-amd64
 ```
 
 ### 16.8 Remove a ports tree
@@ -435,13 +435,13 @@ poudriere ports -d -p default
 ### 16.9 Check for orphaned (unused) packages
 
 ```sh
-poudriere pkgclean -j 14-2-RELEASE-amd64 -p default -n
+poudriere pkgclean -j 14-3-RELEASE-amd64 -p default -n
 ```
 
 ### 16.10 Check saved options for a specific port
 
 ```sh
-poudriere options -j 14-2-RELEASE-amd64 -p default -s print/texlive-texmf
+poudriere options -j 14-3-RELEASE-amd64 -p default -s print/texlive-texmf
 ```
 
 ---
