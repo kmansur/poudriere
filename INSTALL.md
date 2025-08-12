@@ -18,7 +18,7 @@ A virtual machine was created with the following specs:
 - 4 CPUs
 - 100 GB Disk
 
-This server supports approximately 10 FreeBSD 14.2 servers and is prepared for FreeBSD 15.
+This server supports approximately 10 FreeBSD 14.3 servers and is prepared for FreeBSD 15.
 The environment has about 1,000 ports installed, many with customized options.
 Poudriere was chosen to manage, customize, and distribute these packages efficiently.
 
@@ -278,7 +278,7 @@ service nginx reload
 > The jail provides an isolated environment for package building; the ports tree provides the software source code structure.
 
 ```sh
-poudriere jail -c -j 14-2-RELEASE-amd64 -v 14.2-RELEASE
+poudriere jail -c -j 14-2-RELEASE-amd64 -v 14.3-RELEASE
 poudriere ports -c -p default
 ```
 
