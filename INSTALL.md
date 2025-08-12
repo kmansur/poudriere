@@ -8,8 +8,8 @@
 ## 1. Environment Overview
 
 - **Hostname:** `pkg.domain.com.br`
-- **Host System:** FreeBSD 15 with ZFS
-- **Build Jail:** FreeBSD 14.2
+- **Host System:** FreeBSD 14.3 with ZFS
+- **Build Jail:** FreeBSD 14.3
 - **Poudriere Base Storage:** `/usr/local/poudriere`
 
 A virtual machine was created with the following specs:
