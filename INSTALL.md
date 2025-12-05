@@ -127,22 +127,77 @@ openssl rsa -in /usr/local/etc/ssl/keys/poudriere.key -pubout -out /usr/local/et
 > Defines the main Poudriere settings, such as dataset pool, mirrors, caching directories, and build behavior.
 
 ```conf
-ZPOOL=zroot
-BASEFS=/usr/local/poudriere
-POUDRIERE_DATA=${BASEFS}/data
-FREEBSD_HOST=https://download.FreeBSD.org
-RESOLV_CONF=/etc/resolv.conf
-DISTFILES_CACHE=${BASEFS}/distfiles
-CHECK_CHANGED_OPTIONS=verbose
-CHECK_CHANGED_DEPS=yes
-PKG_REPO_SIGNING_KEY=/usr/local/etc/ssl/keys/poudriere.key
-CCACHE_DIR=/var/cache/ccache
-PARALLEL_JOBS=3
+# Let poudriere use ports' MAKE_JOBS (parallel build inside make itself)
 ALLOW_MAKE_JOBS=yes
+
+# Base directory where poudriere stores everything (jails, ports, data, logs, etc.)
+BASEFS=/usr/local/poudriere
+
+# ccache directory used to speed up rebuilds
+CCACHE_DIR=/var/cache/ccache
+
+# If any port dependency changes, force a package rebuild
+CHECK_CHANGED_DEPS=yes
+
+# If build options change, show details and rebuild the package
+CHECK_CHANGED_OPTIONS=verbose
+
+# Cache for distfiles (tarballs fetched from ports)
+DISTFILES_CACHE=${BASEFS}/distfiles
+
+# Official server used to fetch FreeBSD base/jails
+FREEBSD_HOST=https://download.FreeBSD.org
+
+# Do not keep old packages in the repo after a successful build (remove old versions)
+KEEP_OLD_PACKAGES=no
+
+# Number of parallel poudriere jobs (how many ports at once)
+PARALLEL_JOBS=5
+
+# Private key used to sign the pkg repository
+PKG_REPO_SIGNING_KEY=/usr/local/etc/ssl/keys/poudriere.key 
+
+# Poudriere data directory (repos, jails, logs, etc.)
+POUDRIERE_DATA=${BASEFS}/data
+
+# resolv.conf file copied into jails (DNS used during builds)
+RESOLV_CONF=/etc/resolv.conf
+
+# Do not run portlint on ports (skip extra port quality checks)
+USE_PORTLINT=no
+
+# Use tmpfs for the build data area (faster, uses RAM)
+USE_TMPFS="data" 
+
+# Do not use tmpfs for port lang/rust (avoid RAM/IO issues for this heavy port)
+TMPFS_BLACKLIST="lang/rust"
+
+# ZFS pool used by poudriere for datasets (jails, data, etc.)
+ZPOOL=zroot
+
+# Max file descriptors (ulimit -n) inside builds
+MAX_FILES=2048
+
+# Update the repository in an atomic way (swap repo only when the new set is ready)
 ATOMIC_PACKAGE_REPOSITORY=yes
+
+# Branch of the binary repository used for fetch (for example latest instead of quarterly)
 PACKAGE_FETCH_BRANCH=latest
-PACKAGE_FETCH_URL=pkg+http://pkg.FreeBSD.org/${ABI}
-PACKAGE_FETCH_WHITELIST="rust llvm* gcc* cargo*"
+
+# URL of the remote binary repository used to fetch some packages
+PACKAGE_FETCH_URL=pkg+http://pkg.FreeBSD.org/\${ABI}
+
+# List of packages allowed for binary fetch (toolchains and some heavy/important packages)
+PACKAGE_FETCH_WHITELIST="rust llvm* gcc* cargo* tex* clamav"
+
+# Heavy packages treated as mutually exclusive in builds (avoid building many toolchains at the same time)
+MUTUALLY_EXCLUSIVE_BUILD_PACKAGES="llvm* rust* gcc*"
+
+# Even if some ports fail, commit the successful packages and run the publish hook
+COMMIT_PACKAGES_ON_FAILURE=yes
+
+# Handle dependencies by name only, ignore version when resolving deps (reduce unnecessary rebuilds)
+PKG_NO_VERSION_FOR_DEPS=yes
 ```
 
 ---
