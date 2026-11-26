@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.19.0-beta.2] - 2026-11-26
+
+Script (poudriere_build.sh):
+- Fix success report: search for "Built ports:" (the text Poudriere prints) only in the bulk output; "Built packages:" never matched, so success mail was never sent.
+- Send error mail when jail update, ports update, bulk or pkgclean fail; report is sent at the end, after pkgclean, with summary lines and the last 100 log lines (the previous echo text was discarded by the stdin redirect).
+- -h works without cfg and without mail(1); defaults apply before validation, so -j/-p work without them in cfg; validate -l and the jail, list and tree names.
+- Lock per ports tree in /var/run (was per jail in /tmp): two jails sharing a tree no longer run "ports -u" under each other's bulk. A held lock is logged to syslog and exits 0 instead of producing a cron mail.
+- Exact jail name match in the running-bulk check; find -delete for log retention.
+- PORTS_TREE, POUDRIERE, POUDRIERE_ETC, LOGDIR and LOCKDIR may be set in cfg (used by tests).
+
+Publisher (poudriere_publish.py):
+- Accept dependencies without version (PKG_NO_VERSION_FOR_DEPS=yes, as in INSTALL.md); they match by name and origin and shared library checks still apply. Before, the native catalogue itself was rejected and nothing was ever published.
+- Hash index by inode, size and mtime plus per-checksum manifest cache: unchanged packages are not read again on every run.
+- Object store uses hard links to the package files (copy only across file systems), so it no longer duplicates the repository.
+- Retention, enabled by default: keeps the current generation, the newest keep_generations and anything younger than min_age_hours; removes unreferenced objects, orphan manifests, stale temporary files and event queues older than event_days (never the active build).
+
+Tests: tests/test_build.sh (mocked poudriere/mail/lockf) and 15 tests in tests/test_publish.py, including an end-to-end worker run with a fake pkg(8).
+
 ## [1.19.0-beta.1] - 2026-11-26
 
 - Experimental opt-in progressive publisher, native hooks and isolated signed generations.

@@ -125,4 +125,4 @@ Consultar `skills/<nome>/SKILL.md` conforme a tarefa. Ler somente as skills rele
 
 ## 10. Beta de publicacao progressiva
 
-A branch feature/progressive-publish contem 1.19.0-beta.1. Consultar docs/PROGRESSIVE-PUBLISH.md. Nunca ativar a beta em producao sem homologacao. Nao modificar arquivos nativos do Poudriere. O atualizador de arquivo unico fica bloqueado na beta.
+A branch feature/progressive-publish contem 1.19.0-beta.2. Consultar docs/PROGRESSIVE-PUBLISH.md. Nunca ativar a beta em producao sem homologacao. Nao modificar arquivos nativos do Poudriere. O atualizador de arquivo unico fica bloqueado na beta.

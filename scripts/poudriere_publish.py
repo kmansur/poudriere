@@ -1,13 +1,14 @@
 #!/usr/local/bin/python3
 """Experimental isolated publisher. No writes to native Poudriere directories."""
-# Version: 1.19.0-beta.1
-import contextlib
+# Version: 1.19.0-beta.2
+import errno
 import fcntl
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -16,6 +17,7 @@ import time
 
 CONFIG = Path("/usr/local/etc/poudriere-progressive.json")
 SAFE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.+@,-]*$")
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
 PKG = "/usr/local/sbin/pkg"
 TAR = "/usr/bin/tar"
 
@@ -80,10 +82,9 @@ def digest(path):
     with path.open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
-def manifest(path):
-    # The compact manifest is JSON in pkg archives. Fail closed on any mismatch.
-    raw = subprocess.check_output([TAR, "-xOf", str(path), "+COMPACT_MANIFEST"])
-    m = json.loads(raw)
+def check_manifest(m):
+    if not isinstance(m, dict):
+        raise ValueError("Invalid manifest")
     for key in ("name","version","origin"):
         if not isinstance(m.get(key), str) or not m[key]:
             raise ValueError("Missing manifest field: " + key)
@@ -94,11 +95,46 @@ def manifest(path):
             raise ValueError("Invalid shared library manifest")
     return m
 
+def manifest(path):
+    # The compact manifest is JSON in pkg archives. Fail closed on any mismatch.
+    raw = subprocess.check_output([TAR, "-xOf", str(path), "+COMPACT_MANIFEST"])
+    return check_manifest(json.loads(raw))
+
+def cached_manifest(root, checksum, obj):
+    # Objects are content addressed, so a manifest extracted once per checksum
+    # stays valid. This avoids running tar on every package every run.
+    store = root / "manifests"
+    store.mkdir(exist_ok=True, mode=0o755)
+    path = store / (checksum + ".json")
+    if path.is_file():
+        try:
+            return check_manifest(json.loads(path.read_text()))
+        except ValueError:
+            path.unlink()
+    m = manifest(obj)
+    atomic_json(path, m)
+    return m
+
 def abi(m):
     value = m.get("abi") or m.get("arch")
     if not isinstance(value, str) or not value:
         raise ValueError("Missing ABI")
     return value
+
+UNVERSIONED = (None, "", "(null)")
+
+def dependency_ok(spec, other):
+    # A dependency is satisfied when the package exists, the origin matches
+    # (when recorded) and the version matches exactly. Packages built with
+    # PKG_NO_VERSION_FOR_DEPS=yes record no version for their dependencies;
+    # those are matched by name and origin only, and binary compatibility is
+    # then left to the shared library checks below.
+    if not other or not isinstance(spec, dict):
+        return False
+    if spec.get("origin") and other[0]["origin"] != spec["origin"]:
+        return False
+    version = spec.get("version")
+    return version in UNVERSIONED or other[0]["version"] == version
 
 def violations(packages, base_external):
     # Exact version checks are intentionally conservative; not a full pkg solver.
@@ -106,11 +142,7 @@ def violations(packages, base_external):
     errors = []
     for name, (m, _) in packages.items():
         for dep, spec in m.get("deps", {}).items():
-            other = packages.get(dep)
-            if not other or not isinstance(spec, dict) or (
-                other[0]["version"] != spec.get("version") or
-                (spec.get("origin") and other[0]["origin"] != spec["origin"])
-            ):
+            if not dependency_ok(spec, packages.get(dep)):
                 errors.append(name + ": dependency " + dep)
         for lib in m.get("shlibs_required", []):
             # Permit only requirements already external for this same package.
@@ -122,45 +154,83 @@ def external(packages):
     supplied = {lib for m, _ in packages.values() for lib in m.get("shlibs_provided", [])}
     return {n:set(m.get("shlibs_required", []))-supplied for n,(m,_) in packages.items()}
 
-def check_space(cfg, root):
-    if shutil.disk_usage(root).free < int(cfg.get("min_free_gib",20))*1024**3:
+def check_space(cfg, root, needed=0):
+    if shutil.disk_usage(root).free - needed < int(cfg.get("min_free_gib",20))*1024**3:
         raise RuntimeError("Minimum free space threshold reached")
 
-def import_pkg(cfg, root, source):
-    # Copy once into a private immutable-by-policy object store; never hardlink
-    # directly to native packages. Hash before and after to reject changing files.
+def stat_key(st):
+    return "%d:%d" % (st.st_dev, st.st_ino)
+
+def load_index(root):
+    # Index of package files already hashed: "dev:inode" -> size, mtime, sha256.
+    path = root / "index.json"
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+def import_pkg(cfg, root, source, index, seen):
+    # Bring a package into the private content-addressed object store.
+    #
+    # Fast path: a file already hashed in a previous run (same inode, size and
+    # mtime) whose object still exists is reused without reading it again.
+    #
+    # Slow path: hard link the file to a private temporary name first and hash
+    # that inode, so a rename of the source during the scan cannot mix two
+    # files. Poudriere never rewrites package files in place (its own shadow
+    # .building tree is a hard link clone), so sharing the inode is safe and
+    # costs no disk space. Across file systems the file is copied instead and
+    # hashed before and after to reject a file that changed while copying.
     if not source.is_file() or source.is_symlink():
         raise ValueError("Expected regular package file")
-    check_space(cfg, root)
-    checksum = digest(source)
     store = root / "objects"
     store.mkdir(exist_ok=True, mode=0o755)
-    dst = store / (checksum + ".pkg")
-    if not dst.exists():
-        if shutil.disk_usage(root).free - source.stat().st_size < int(cfg.get("min_free_gib",20))*1024**3:
-            raise RuntimeError("Package copy would breach free space threshold")
-        fd, tmp = tempfile.mkstemp(dir=store, prefix=".copy-")
-        os.close(fd)
+    st = source.stat()
+    key = stat_key(st)
+    entry = index.get(key)
+    if (isinstance(entry, dict) and entry.get("size") == st.st_size and
+            entry.get("mtime_ns") == st.st_mtime_ns and
+            SHA256.fullmatch(str(entry.get("sha256", "")))):
+        dst = store / (entry["sha256"] + ".pkg")
+        if dst.is_file() and dst.stat().st_size == st.st_size:
+            seen[key] = entry
+            return cached_manifest(root, entry["sha256"], dst), dst
+    tmp = store / (".import-%d-%s" % (os.getpid(), secrets.token_hex(8)))
+    try:
         try:
+            os.link(source, tmp)
+            copied = False
+        except OSError as exc:
+            if exc.errno not in (errno.EXDEV, errno.EPERM, errno.EMLINK):
+                raise
+            check_space(cfg, root, st.st_size)
             shutil.copyfile(source, tmp)
-            if digest(Path(tmp)) != checksum or digest(source) != checksum:
-                raise RuntimeError("Package changed while copying")
             os.chmod(tmp, 0o444)
-            os.replace(tmp, dst)
-        finally:
-            if os.path.exists(tmp):
-                os.unlink(tmp)
-    if digest(dst) != checksum:
-        raise RuntimeError("Object checksum mismatch")
-    return manifest(dst), dst
+            copied = True
+        checksum = digest(tmp)
+        if copied and digest(source) != checksum:
+            raise RuntimeError("Package changed while copying")
+        dst = store / (checksum + ".pkg")
+        if not dst.exists():
+            os.rename(tmp, dst)
+    finally:
+        if os.path.lexists(tmp):
+            os.unlink(tmp)
+    after = source.stat()
+    if (stat_key(after) == key and after.st_size == st.st_size and
+            after.st_mtime_ns == st.st_mtime_ns):
+        seen[key] = {"size": st.st_size, "mtime_ns": st.st_mtime_ns,
+                     "sha256": checksum}
+    return cached_manifest(root, checksum, dst), dst
 
-def read_native(cfg, native, root):
+def read_native(cfg, native, root, index, seen):
     generation = (native / ".latest").resolve(strict=True)
     if generation.parent != native or not generation.name.startswith(".real_"):
         raise ValueError("Unexpected native repository generation")
     packages = {}
     for path in sorted((generation / "All").glob("*.pkg")):
-        m, obj = import_pkg(cfg, root, path)
+        m, obj = import_pkg(cfg, root, path, index, seen)
         if m["name"] in packages:
             raise ValueError("Duplicate package name in native catalogue")
         packages[m["name"]] = (m,obj)
@@ -241,6 +311,73 @@ def publish(cfg, root, packages):
             link.unlink()
     print("Published experimental generation " + str(final))
 
+def build_in_progress(native):
+    marker = native / ".building" / ".buildname"
+    try:
+        return marker.read_text().strip()
+    except OSError:
+        return ""
+
+def prune(cfg, root, active_build):
+    # Retention, enabled by default; set "retention": {"enabled": false} to
+    # keep everything. Never removes the current generation, the newest
+    # keep_generations ones, or anything younger than min_age_hours (clients
+    # of the laboratory may still be downloading from it).
+    policy = cfg.get("retention", {})
+    if not policy.get("enabled", True):
+        return
+    keep = int(policy.get("keep_generations", 5))
+    min_age = float(policy.get("min_age_hours", 24)) * 3600
+    event_age = float(policy.get("event_days", 7)) * 86400
+    stale_tmp = 3600
+    now = time.time()
+    generations = root / "generations"
+    current = root / "current"
+    current_name = current.resolve().name if current.is_symlink() else None
+    if generations.is_dir():
+        finished = [p for p in generations.iterdir()
+                    if SHA256.fullmatch(p.name) and p.is_dir() and not p.is_symlink()]
+        finished.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        protected = {p.name for p in finished[:keep]}
+        protected.add(current_name)
+        for path in finished:
+            if path.name in protected or now - path.stat().st_mtime < min_age:
+                continue
+            shutil.rmtree(path)
+            print("Removed old generation " + path.name)
+        for path in generations.glob(".stage-*"):
+            if path.is_dir() and not path.is_symlink() and now - path.stat().st_mtime > stale_tmp:
+                shutil.rmtree(path)
+        referenced = set()
+        for path in generations.iterdir():
+            if path.is_dir() and not path.is_symlink():
+                referenced.update(f.name for f in (path / "All").glob("*.pkg"))
+    else:
+        referenced = set()
+    objects = root / "objects"
+    if objects.is_dir():
+        for path in objects.iterdir():
+            st = path.lstat()
+            # ctime changes when a hard link is added, so it marks when the
+            # object entered the store even if the package file is old.
+            age = now - st.st_ctime
+            if path.name.startswith("."):
+                if age > stale_tmp:
+                    path.unlink()
+            elif path.name.endswith(".pkg") and path.name not in referenced and age > stale_tmp:
+                path.unlink()
+    manifests = root / "manifests"
+    if manifests.is_dir():
+        for path in manifests.glob("*.json"):
+            if not (objects / (path.stem + ".pkg")).exists():
+                path.unlink()
+    events = root / "events"
+    if events.is_dir():
+        for path in events.iterdir():
+            if (path.is_dir() and not path.is_symlink() and path.name != active_build
+                    and now - path.stat().st_mtime > event_age):
+                shutil.rmtree(path)
+
 def worker(cfg, master):
     native, root = roots(cfg, master)
     root.mkdir(parents=True, exist_ok=True, mode=0o755)
@@ -250,7 +387,9 @@ def worker(cfg, master):
         except BlockingIOError:
             return
         check_space(cfg, root)
-        generation, base = read_native(cfg, native, root)
+        index = load_index(root)
+        seen = {}
+        generation, base = read_native(cfg, native, root, index, seen)
         candidates = []
         queues = root / "events"
         # Only use events belonging to the current shadow build. A stale queue
@@ -267,16 +406,21 @@ def worker(cfg, master):
                     evt = json.loads(path.read_text())
                     source = shadow / "All" / (token(evt["pkgname"]) + ".pkg")
                     if source.is_file():
-                        m,obj = import_pkg(cfg, root, source)
+                        m,obj = import_pkg(cfg, root, source, index, seen)
                         if m["name"] + "-" + m["version"] != evt["pkgname"]:
                             raise ValueError("Package name mismatch")
                         candidates.append((m,obj))
                 if not marker.is_file() or marker.read_text().strip() != build:
                     raise RuntimeError("Shadow generation switched; retry")
+        # Save the hash index before the selection, so a run that fails
+        # closed below still spares the next run from hashing again. Only
+        # entries for files seen in this run are kept; the index stays small.
+        atomic_json(root / "index.json", seen)
         selected = choose(base, candidates)
         if (native / ".latest").resolve(strict=True) != generation:
             raise RuntimeError("Native generation switched; retry")
         publish(cfg, root, selected)
+        prune(cfg, root, build_in_progress(native))
 
 def main():
     cfg = load_config()

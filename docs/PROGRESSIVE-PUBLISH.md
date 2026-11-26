@@ -1,4 +1,4 @@
-# Publicacao progressiva - 1.19.0-beta.1
+# Publicacao progressiva - 1.19.0-beta.2
 
 ## Estado experimental
 
@@ -7,9 +7,11 @@ A branch nao altera o Poudriere instalado, sua configuracao, jails ou URL de pro
 ## Limites de seguranca e homologacao
 
 - Python 3.11+ e necessario para JSON, hashes e verificacao de manifestos. Shell permanece /bin/sh.
-- O worker copia pacotes nativos para objetos privados identificados por SHA256. Hard links somente dentro do armazenamento proprio. Nao apaga objetos, eventos ou geracoes automaticamente nesta beta; monitorar espaco e planejar limpeza offline. O limite de 20 GiB nao reserva espaco e nao impede outros processos de consumir o pool.
+- O worker cria hard links dos pacotes nativos para objetos privados identificados por SHA256 (o Poudriere nunca reescreve um pacote no lugar; o proprio .building e um clone por hard links). Se state_root estiver em outro sistema de arquivos/dataset, o worker copia o arquivo e verifica o hash antes e depois. Manter state_root no mesmo dataset dos packages para nao duplicar o repositorio. O limite de min_free_gib nao reserva espaco e nao impede outros processos de consumir o pool.
+- Indice de hashes (state_root/MASTER/index.json, por inode, tamanho e mtime) e cache de manifestos (manifests/SHA256.json): pacotes inalterados nao sao lidos de novo a cada execucao. Apagar index.json forca um novo calculo completo, sem outro efeito.
+- Retencao habilitada por padrao (bloco retention do JSON): mantem a geracao current, as keep_generations mais novas e qualquer geracao com menos de min_age_hours; remove objetos nao referenciados por nenhuma geracao (apos 1 hora), manifestos orfaos, temporarios antigos e filas de eventos com mais de event_days, nunca a da build ativa. Clientes de laboratorio fixados em uma geracao removida deixam de funcionar: aponte-os para uma geracao recente ou aumente keep_generations/min_age_hours. Para nao apagar nada, usar "enabled": false.
 - O worker usa .building/.buildname e eventos pkgbuild success. Confirmar que esse marcador existe durante a build na versao instalada e que PKG_EXT e .pkg. Se nao existir, apenas a geracao nativa sera publicada. Pacotes baixados por fetch sem hook de sucesso so entram na sincronizacao final.
-- A selecao exige versoes exatas de dependencias, mesma ABI e disponibilidade de shlibs, incluindo dependencias reversas. Dependencias externas previamente observadas sao toleradas por nome de pacote. Nao equivale ao solver pkg, nao prova compatibilidade binaria, conflitos de arquivos ou disponibilidade de bibliotecas base. Pode bloquear um catalogo nativo valido que utilize dependencias sem versao. Nesse caso falha fechada; nao desabilitar as verificacoes para contornar.
+- A selecao exige mesma ABI, origin igual e disponibilidade de shlibs, incluindo dependencias reversas. Quando o manifesto registra a versao da dependencia, ela precisa ser exata; dependencias sem versao (PKG_NO_VERSION_FOR_DEPS=yes, configuracao do INSTALL.md) sao aceitas por nome e origin, e a compatibilidade binaria fica a cargo da verificacao de shlibs. Dependencias externas previamente observadas sao toleradas por nome de pacote. Nao equivale ao solver pkg, nao prova compatibilidade binaria, conflitos de arquivos ou disponibilidade de bibliotecas base. Em caso de violacao falha fechada; nao desabilitar as verificacoes para contornar.
 - O catalogo e gerado com pkg repo e RSA; a verificacao real de assinatura e solver em FreeBSD e obrigatoria antes de qualquer uso. Nao ha garantia de publicacao imediata de todo pacote.
 - Usar somente URL de geracao imutavel em clientes de teste. Nao expor a raiz state_root, current, objects ou events via Nginx. Nao mudar /packages em producao. Uma URL estavel exige resolver a corrida entre catalogo e arquivos em geracoes diferentes, validacao do solver e politica de retencao.
 - O worker usa flock exclusivo por master; os hooks nao dependem do lock. Nao ha alteracao de .latest nativo.
@@ -25,6 +27,7 @@ for f in scripts/poudriere_build.sh scripts/poudriere_publish.sh hooks/*.sh; do
     /bin/sh -n "$f" || exit 1
 done
 python3 tests/test_publish.py
+sh tests/test_build.sh
 
 # Create isolated beta directory and native plugin directory
 install -d -m 0755 /usr/local/scripts/poudriere-beta
@@ -67,6 +70,10 @@ Change the access rule only in the lab, then test pkg update, pkg upgrade -n and
 
 Set enabled=false with vi, remove only the beta cron entry using crontab -e, wait for the worker to exit, remove the test Nginx location after configtest and reload. Disable plugin by moving it outside hooks/plugins (do not just rename within plugins). Preserve state for forensic review; do not delete automatically. The native Poudriere and v1.18 remain unchanged. In lab clients restore their original repository config and run pkg update -f. A metadata rollback alone cannot downgrade installed packages.
 
+Retention: to stop any automatic deletion set "retention": {"enabled": false} with vi; nothing already removed comes back, so raise keep_generations/min_age_hours before tests that pin a generation.
+
+Build script 1.19.0-beta.2: the lock is now per ports tree in /var/run (was per jail in /tmp), so two jails sharing a tree do not run at the same time; the second run logs to syslog and exits 0. To roll back, reinstall the previous script from its Git tag or the main branch over the beta copy, keeping the existing poudriere_build.cfg.
+
 ## Validation status
 
-Unit tests are provided; real FreeBSD/pkg signature, solver, hook timing and Nginx tests remain required. No production installation is authorized by this commit.
+Unit tests are provided (tests/test_publish.py, tests/test_build.sh), including an end-to-end worker run with a fake pkg(8); real FreeBSD/pkg signature, solver, hook timing and Nginx tests remain required. No production installation is authorized by this commit.

@@ -6,5 +6,11 @@
   "native_root": "/usr/local/poudriere/data/packages",
   "state_root": "/usr/local/poudriere/data/progressive",
   "signing_key": "/usr/local/etc/ssl/keys/poudriere.key",
-  "min_free_gib": 20
+  "min_free_gib": 20,
+  "retention": {
+    "enabled": true,
+    "keep_generations": 5,
+    "min_age_hours": 24,
+    "event_days": 7
+  }
 }
