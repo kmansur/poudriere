@@ -23,13 +23,6 @@ PKGLIST_NAME="pkglist"
 # by -b latest catches up.
 #UPDATE_PORTS_TREE="yes"
 
-# Build mode (bulk|serial):
-#   bulk   : one bulk with the whole list (default)
-#   serial : one bulk per origin, in list order; the repository is
-#            committed after each origin, so finished ports are published
-#            without waiting for the whole list. Slower overall.
-#BUILD_MODE="bulk"
-
 # Origins of the package list renamed or removed in the ports tree MOVED
 # file (report|fix):
 #   report : list them in the log and the mail (default)

@@ -22,12 +22,7 @@ case "$1" in
   jail) exit "${JAIL_RC:-0}" ;;
   ports) exit "${PORTS_RC:-0}" ;;
   bulk)
-    # Serial mode passes the origin as the last argument.
-    for last in "$@"; do :; done
-    if [ -n "${FAIL_ORIGIN:-}" ] && [ "$last" = "$FAIL_ORIGIN" ]; then
-      exit 1
-    fi
-    [ "${BUILT:-0}" -eq 1 ] && echo "[00:01:00] Built ports: $last"
+    [ "${BUILT:-0}" -eq 1 ] && echo "[00:01:00] Built ports: ports-mgmt/pkg"
     # Record anything poudriere could read from stdin (must be nothing).
     if [ ! -t 0 ] && read -r stolen; then
       echo "stdin leaked: $stolen" >> "$CALLS"
@@ -177,26 +172,11 @@ check "default mode runs one bulk" [ "$(grep -c '^bulk' "$CALLS")" -eq 1 ]
 check "default mode uses -f list" grep -q "^bulk .*-f $WORK/etc/pkglist" "$CALLS"
 check "default mode updates ports" grep -q "^ports -u" "$CALLS"
 
-# 12. BUILD_MODE=serial: one bulk per origin, comments ignored, pkgclean once.
+# 12. Obsolete BUILD_MODE in cfg: ignored with a warning, one bulk.
 run BUILT=1 BUILD_MODE=serial
-check "serial exits 0" [ "$RC" -eq 0 ]
-check "serial runs one bulk per origin" [ "$(grep -c '^bulk' "$CALLS")" -eq 3 ]
-check "serial bulk for www/nginx" grep -q "^bulk .* www/nginx$" "$CALLS"
-check "serial never uses -f in bulk" sh -c "! grep -q '^bulk .*-f' '$CALLS'"
-check "serial does not leak stdin" sh -c "! grep -q 'stdin leaked' '$CALLS'"
-check "serial runs pkgclean once" [ "$(grep -c '^pkgclean' "$CALLS")" -eq 1 ]
-check "serial sends OK mail" grep -q "Poudriere Build OK" "$MAILS"
-
-# 13. Serial with one failing origin: others still built, failure reported.
-run BUILT=1 BUILD_MODE=serial FAIL_ORIGIN=www/nginx
-check "serial failure exits non-zero" [ "$RC" -ne 0 ]
-check "serial continues after failure" grep -q "^bulk .* sysutils/tmux$" "$CALLS"
-check "serial failure names origin" grep -q "bulk failed for: www/nginx" "$MAILS"
-check "serial failure skips pkgclean" sh -c "! grep -q '^pkgclean' '$CALLS'"
-
-# 14. Invalid BUILD_MODE rejected.
-run BUILD_MODE=parallel
-check "invalid BUILD_MODE rejected" [ "$RC" -ne 0 ]
+check "obsolete BUILD_MODE does not fail" [ "$RC" -eq 0 ]
+check "obsolete BUILD_MODE still runs one bulk" [ "$(grep -c '^bulk' "$CALLS")" -eq 1 ]
+check "obsolete BUILD_MODE warned in log" sh -c "grep -q 'BUILD_MODE=serial is no longer supported' \$(ls -t '$WORK'/log/*.log | head -1)"
 
 # 15. MOVED handling. Fake ports tree with a MOVED file and target dirs.
 PORTS="$WORK/ports"
