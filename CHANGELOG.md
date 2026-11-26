@@ -5,7 +5,8 @@
 ### Added
 - `UPDATE_PORTS_TREE=yes|no` (default `yes`): `no` skips `poudriere ports -u`; the jail is still updated.
 - `BUILD_MODE=bulk|serial` (default `bulk`): `serial` runs one `poudriere bulk` per origin of the list, in order, so the repository is committed (and published) after each origin. A failing origin does not stop the others; the run fails at the end, the error mail lists the failed origins and `pkgclean` is skipped, as in bulk mode. Blank lines and `#` comments in the list are ignored.
-- Both values are validated; defaults keep the 1.19.0 behaviour.
+- `MOVED_ACTION=report|fix` (default `report`): before the bulk, the package list is compared with the `MOVED` file of the ports tree (path from `poudriere ports -l`, or `PORTS_DIR`). Renamed origins (following chains and keeping `@flavor`), removed origins and renames whose target is missing are written to the log and listed in the mail; a notice mail is sent even when nothing was built. With `fix`, renamed origins are rewritten in the list (dated `.bak` backup, comments kept, an origin already listed is commented out instead of duplicated) and saved options of the old origin are copied to the new one in `options` and `*-options` directories when the new one has none. Removed origins and missing targets are only reported.
+- All values are validated; defaults keep the 1.19.0 behaviour.
 
 ### Tests
 - `tests/test_build.sh` covers both options, list comments, a failing origin in serial mode and that poudriere never reads the list from stdin.

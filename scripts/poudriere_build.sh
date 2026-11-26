@@ -53,6 +53,14 @@ Variables (from poudriere_build.cfg):
                             bulk   : one bulk with the whole list
                             serial : one bulk per origin of the list; the
                                      repository is committed after each one
+  MOVED_ACTION            report|fix (default: report)
+                            report : list origins of the package list that
+                                     the ports tree MOVED file renamed or
+                                     removed, in the log and the mail
+                            fix    : also rewrite renamed origins in the
+                                     list (dated backup kept) and copy saved
+                                     options to the new origin
+  PORTS_DIR               Ports tree path (default: from 'poudriere ports -l')
   LOG_RETENTION_DAYS      Days to keep logs (default: 7)
   AUTOUPDATE              Ignored since 1.19 (update from a Git checkout)
 EOF
@@ -81,6 +89,7 @@ fi
 : "${LOG_RETENTION_DAYS:=7}"
 : "${UPDATE_PORTS_TREE:=yes}"
 : "${BUILD_MODE:=bulk}"
+: "${MOVED_ACTION:=report}"
 
 # Parse options. -i is internal: it marks the run already holding the lock.
 INTERNAL=0
@@ -137,6 +146,14 @@ case "$BUILD_MODE" in
     ;;
 esac
 
+case "$MOVED_ACTION" in
+  report|fix) ;;
+  *)
+    echo "[ERROR] MOVED_ACTION must be report or fix: '$MOVED_ACTION'" >&2
+    exit 1
+    ;;
+esac
+
 # Check if mail command is available
 command -v mail >/dev/null 2>&1 || {
   echo "[ERROR] 'mail' command not found. Please install mailutils or bsd-mailx." >&2
@@ -180,6 +197,11 @@ notify() {
     echo
     grep -E "(Built|Failed|Skipped|Ignored|Fetched) ports:" "$LOGFILE"
     echo
+    if [ -s "$MOVED_REPORT" ]; then
+      echo "---- package list: moved or removed origins ----"
+      cat "$MOVED_REPORT"
+      echo
+    fi
     echo "---- last 100 log lines ----"
     tail -n 100 "$LOGFILE"
   } > "$body"
@@ -190,6 +212,10 @@ notify() {
   fi
   rm -f "$body"
 }
+
+# Report of moved/removed origins for this run (see check_moved).
+MOVED_REPORT=$(mktemp) || exit 1
+trap 'rm -f "$MOVED_REPORT"' EXIT
 
 if [ ! -f "$PKGLIST" ]; then
   log "[ERROR]" "Package list file not found: $PKGLIST"
@@ -227,6 +253,142 @@ run_serial() {
   [ "$failures" -eq 0 ]
 }
 
+# Path of the ports tree: PORTS_DIR from cfg, else the last column of
+# 'poudriere ports -l -q' for PORTS_TREE (the timestamp column has spaces).
+ports_dir() {
+  if [ -n "${PORTS_DIR:-}" ]; then
+    echo "$PORTS_DIR"
+    return
+  fi
+  "$POUDRIERE" ports -l -q 2>/dev/null | awk -v t="$PORTS_TREE" '$1 == t { print $NF; exit }'
+}
+
+# Compare the package list with the MOVED file of the ports tree.
+# MOVED lines are "old|new|date|reason"; an empty "new" means the port was
+# removed. Renames are followed in chains (a -> b -> c). Flavors (@name)
+# are kept. Writes one line per affected origin to $MOVED_REPORT and, with
+# MOVED_ACTION=fix, rewrites renamed origins in the list.
+check_moved() {
+  tree=$(ports_dir)
+  moved="$tree/MOVED"
+  if [ -z "$tree" ] || [ ! -r "$moved" ]; then
+    log "[WARNING]" "MOVED file not found for ports tree $PORTS_TREE (${moved}); check skipped."
+    return 0
+  fi
+
+  pairs=$(mktemp) || return 1
+  # Output: kind|old|new|date|reason (kind: MOVED, REMOVED or MISSING when
+  # the new origin does not exist in the tree).
+  awk -F'|' -v tree="$tree" '
+    FNR == NR {
+      if ($0 ~ /^#/ || NF < 2) next
+      to[$1] = $2; when[$1] = $3; why[$1] = $4
+      next
+    }
+    {
+      line = $0
+      sub(/#.*/, "", line)
+      gsub(/^[ \t]+|[ \t]+$/, "", line)
+      if (line == "") next
+      origin = line; flavor = ""
+      at = index(origin, "@")
+      if (at) { flavor = substr(origin, at); origin = substr(origin, 1, at - 1) }
+      if (!(origin in to) || seen[line]++) next
+      cur = origin; hops = 0; kind = "MOVED"
+      while ((cur in to) && hops < 20) {
+        last = cur
+        if (to[cur] == "") { kind = "REMOVED"; break }
+        cur = to[cur]; hops++
+      }
+      new = (kind == "REMOVED") ? "" : cur flavor
+      if (kind == "MOVED" && system("test -d \"" tree "/" cur "\"") != 0) kind = "MISSING"
+      print kind "|" line "|" new "|" when[last] "|" why[last]
+    }
+  ' "$moved" "$PKGLIST" > "$pairs"
+
+  if [ ! -s "$pairs" ]; then
+    rm -f "$pairs"
+    return 0
+  fi
+
+  while IFS='|' read -r kind old new when why; do
+    case "$kind" in
+      MOVED) echo "renamed: $old -> $new ($when: $why)" ;;
+      REMOVED) echo "removed: $old ($when: $why) - remove it from the list" ;;
+      MISSING) echo "renamed: $old -> $new ($when), but $new is not in the tree - check by hand" ;;
+    esac
+  done < "$pairs" >> "$MOVED_REPORT"
+  log "[WARNING]" "Package list has moved or removed origins:"
+  sed 's/^/    /' "$MOVED_REPORT" >> "$LOGFILE"
+
+  if [ "$MOVED_ACTION" = "fix" ] && grep -q '^MOVED|' "$pairs"; then
+    fix_moved "$pairs"
+  fi
+  rm -f "$pairs"
+  return 0
+}
+
+# Rewrite renamed origins in the package list. The original is kept as
+# <list>.<timestamp>.bak with permissions. Comments and spacing are kept; a
+# line whose new origin is already in the list is commented out instead of
+# duplicated. Saved options of the old origin are copied to the new one in
+# every options directory of POUDRIERE_ETC, only when the new one has none.
+fix_moved() {
+  backup="${PKGLIST}.${TIMESTAMP}.bak"
+  new_list=$(mktemp) || return 1
+  if ! cp -p "$PKGLIST" "$backup"; then
+    log "[ERROR]" "Could not back up $PKGLIST; package list not changed."
+    rm -f "$new_list"
+    return 1
+  fi
+  # First file: kind|old|new|... pairs; second file: the package list.
+  awk -F'|' '
+    FNR == NR { if ($1 == "MOVED") to[$2] = $3; next }
+    { lines[++n] = $0 }
+    END {
+      # Origins present in the list, to avoid duplicates after renaming.
+      for (i = 1; i <= n; i++) {
+        o = lines[i]; sub(/#.*/, "", o); gsub(/^[ \t]+|[ \t]+$/, "", o)
+        if (o != "") present[o] = 1
+      }
+      for (i = 1; i <= n; i++) {
+        o = lines[i]; sub(/#.*/, "", o); gsub(/^[ \t]+|[ \t]+$/, "", o)
+        if (o != "" && (o in to)) {
+          if (to[o] in present) {
+            print "# MOVED to " to[o] " (already listed): " lines[i]
+          } else {
+            line = lines[i]
+            p = index(line, o)
+            print substr(line, 1, p - 1) to[o] substr(line, p + length(o))
+            present[to[o]] = 1
+          }
+        } else {
+          print lines[i]
+        }
+      }
+    }
+  ' "$1" "$PKGLIST" > "$new_list"
+  # Write through the existing file to keep its owner and mode.
+  cat "$new_list" > "$PKGLIST"
+  rm -f "$new_list"
+  log "[INFO]" "Package list updated; backup: $backup"
+  echo "package list updated (MOVED_ACTION=fix); backup: $backup" >> "$MOVED_REPORT"
+
+  grep '^MOVED|' "$1" | while IFS='|' read -r kind old new when why; do
+    old_dir=$(echo "${old%@*}" | tr / _)
+    new_dir=$(echo "${new%@*}" | tr / _)
+    for optdir in "$POUDRIERE_ETC"/options "$POUDRIERE_ETC"/*-options; do
+      [ -d "$optdir/$old_dir" ] || continue
+      if [ -e "$optdir/$new_dir" ]; then
+        echo "options: $optdir/$new_dir already exists; $old_dir not copied" >> "$MOVED_REPORT"
+      elif cp -Rp "$optdir/$old_dir" "$optdir/$new_dir"; then
+        echo "options: copied $optdir/$old_dir -> $new_dir" >> "$MOVED_REPORT"
+      fi
+    done
+  done
+  return 0
+}
+
 execute_build() {
   # Match the exact jail name, not a prefix (jail "14" must not match "142").
   PIDS=$(pgrep -f "poudriere.*bulk.*-j ${JAIL_NAME}( |\$)")
@@ -252,6 +414,8 @@ execute_build() {
   else
     log "[INFO]" "UPDATE_PORTS_TREE=no; keeping ports tree $PORTS_TREE as is."
   fi
+
+  check_moved
 
   # Remember where the bulk output starts so only it is searched later.
   BULK_START=$(($(wc -l < "$LOGFILE") + 1))
@@ -297,7 +461,11 @@ execute_build() {
   elif [ "$BUILT" -eq 1 ]; then
     notify "Poudriere Build OK - $JAIL_NAME" "Build completed successfully."
   else
-    log "[INFO]" "No packages were built. No email will be sent."
+    if [ -s "$MOVED_REPORT" ]; then
+      notify "Poudriere Build - $JAIL_NAME - package list needs attention" "No packages were built, but the package list has moved or removed origins."
+    else
+      log "[INFO]" "No packages were built. No email will be sent."
+    fi
   fi
 
   return "$STATUS"

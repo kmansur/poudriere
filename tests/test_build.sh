@@ -198,6 +198,88 @@ check "serial failure skips pkgclean" sh -c "! grep -q '^pkgclean' '$CALLS'"
 run BUILD_MODE=parallel
 check "invalid BUILD_MODE rejected" [ "$RC" -ne 0 ]
 
+# 15. MOVED handling. Fake ports tree with a MOVED file and target dirs.
+PORTS="$WORK/ports"
+mkdir -p "$PORTS/graphics/py-pylerc" "$PORTS/databases/openldap26-client" \
+  "$PORTS/net/php-xmlrpc" "$PORTS/www/py-beautifulsoup4" "$PORTS/devel/c"
+cat > "$PORTS/MOVED" <<'MOVEDEOF'
+# MOVED file sample
+graphics/py-lerc|graphics/py-pylerc|2026-11-01|Renamed to match upstream
+net/openldap26-client|databases/openldap26-client|2026-11-02|Moved to databases
+net/pecl-xmlrpc|net/php-xmlrpc|2026-11-03|Renamed
+www/py-beautifulsoup|www/py-beautifulsoup4|2026-11-04|Renamed
+devel/a|devel/b|2026-01-01|First rename
+devel/b|devel/c|2026-02-01|Second rename
+misc/gone||2026-03-01|Removed: abandoned upstream
+misc/ghost|misc/nowhere|2026-03-02|Renamed, target missing
+MOVEDEOF
+cat > "$WORK/etc/movedlist" <<'LISTEOF'
+# production list
+graphics/py-lerc
+net/openldap26-client   # LDAP client
+net/pecl-xmlrpc
+www/py-beautifulsoup@py311
+www/py-beautifulsoup4@py311
+devel/a
+misc/gone
+misc/ghost
+sysutils/tmux
+LISTEOF
+cp "$WORK/etc/movedlist" "$WORK/movedlist.orig"
+mkdir -p "$WORK/etc/options/net_openldap26-client" "$WORK/etc/testjail-options/graphics_py-lerc"
+echo "OPTIONS_FILE_SET+=SASL" > "$WORK/etc/options/net_openldap26-client/options"
+echo "PORTS_DIR=\"$PORTS\"" >> "$WORK/script/poudriere_build.cfg"
+
+# report (default): list untouched, report in mail.
+: > "$CALLS"; : > "$MAILS"
+"$WORK/script/poudriere_build.sh" -p movedlist < /dev/null > "$WORK/out" 2>&1
+RC=$?
+check "MOVED report exits 0" [ "$RC" -eq 0 ]
+check "report keeps list unchanged" cmp -s "$WORK/etc/movedlist" "$WORK/movedlist.orig"
+check "report mail sent with nothing built" grep -q "package list needs attention" "$MAILS"
+check "report lists rename" grep -q "renamed: graphics/py-lerc -> graphics/py-pylerc" "$MAILS"
+check "report follows chains" grep -q "renamed: devel/a -> devel/c" "$MAILS"
+check "report keeps flavor" grep -q "renamed: www/py-beautifulsoup@py311 -> www/py-beautifulsoup4@py311" "$MAILS"
+check "report lists removed" grep -q "removed: misc/gone" "$MAILS"
+check "report flags missing target" grep -q "misc/nowhere is not in the tree" "$MAILS"
+check "report ignores unmoved origins" sh -c "! grep -q 'sysutils/tmux' '$MAILS'"
+check "report does not copy options" [ ! -e "$WORK/etc/options/databases_openldap26-client" ]
+check "report keeps building" grep -q "^bulk .*-f $WORK/etc/movedlist" "$CALLS"
+
+# fix: list rewritten with backup, comments kept, duplicates avoided.
+: > "$CALLS"; : > "$MAILS"
+MOVED_ACTION=fix "$WORK/script/poudriere_build.sh" -p movedlist < /dev/null > "$WORK/out" 2>&1
+RC=$?
+check "MOVED fix exits 0" [ "$RC" -eq 0 ]
+check "fix keeps a backup" sh -c "cmp -s '$WORK/movedlist.orig' '$WORK'/etc/movedlist.*.bak"
+check "fix renames origin" grep -qx "graphics/py-pylerc" "$WORK/etc/movedlist"
+check "fix keeps trailing comment" grep -qx "databases/openldap26-client   # LDAP client" "$WORK/etc/movedlist"
+check "fix follows chains" grep -qx "devel/c" "$WORK/etc/movedlist"
+check "fix comments out duplicate" grep -q "^# MOVED to www/py-beautifulsoup4@py311 (already listed): www/py-beautifulsoup@py311" "$WORK/etc/movedlist"
+check "fix keeps flavored origin once" [ "$(grep -cx 'www/py-beautifulsoup4@py311' "$WORK/etc/movedlist")" -eq 1 ]
+check "fix leaves removed origin for review" grep -qx "misc/gone" "$WORK/etc/movedlist"
+check "fix leaves missing target for review" grep -qx "misc/ghost" "$WORK/etc/movedlist"
+check "fix copies global options" [ -f "$WORK/etc/options/databases_openldap26-client/options" ]
+check "fix copies jail options" [ -d "$WORK/etc/testjail-options/graphics_py-pylerc" ]
+check "fix keeps old options" [ -d "$WORK/etc/options/net_openldap26-client" ]
+check "fix reported in mail" grep -q "package list updated" "$MAILS"
+
+# Second fix run: only removed/missing remain, no new backup needed.
+: > "$MAILS"
+MOVED_ACTION=fix "$WORK/script/poudriere_build.sh" -p movedlist < /dev/null > "$WORK/out" 2>&1
+check "second run reports no renames" sh -c "! grep -q '^renamed: graphics' '$MAILS'"
+check "second run still reports removed" grep -q "removed: misc/gone" "$MAILS"
+
+# Invalid value
+run MOVED_ACTION=auto
+check "invalid MOVED_ACTION rejected" [ "$RC" -ne 0 ]
+
+# Missing MOVED file: warning, build still runs.
+echo "PORTS_DIR=\"$WORK/noports\"" >> "$WORK/script/poudriere_build.cfg"
+run BUILT=1
+check "missing MOVED file does not stop build" [ "$RC" -eq 0 ]
+check "missing MOVED file logged" sh -c "grep -q 'MOVED file not found' '$WORK'/log/*.log"
+
 if [ "$FAILURES" -ne 0 ]; then
   echo "$FAILURES test(s) failed"
   exit 1

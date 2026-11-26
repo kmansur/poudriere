@@ -30,6 +30,17 @@ PKGLIST_NAME="pkglist"
 #            without waiting for the whole list. Slower overall.
 #BUILD_MODE="bulk"
 
+# Origins of the package list renamed or removed in the ports tree MOVED
+# file (report|fix):
+#   report : list them in the log and the mail (default)
+#   fix    : also rewrite renamed origins in the list (a dated .bak copy is
+#            kept) and copy saved options to the new origin. Removed origins
+#            are only reported.
+#MOVED_ACTION="report"
+
+# Ports tree path; only needed if 'poudriere ports -l' does not show it.
+#PORTS_DIR="/usr/local/poudriere/ports/default"
+
 # Number of days to retain build logs
 LOG_RETENTION_DAYS=7
 
