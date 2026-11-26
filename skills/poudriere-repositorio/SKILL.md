@@ -34,3 +34,7 @@ Na configuracao de cliente, nao habilitar simultaneamente repositorios oficiais 
 ## Entrega obrigatoria
 
 Indicar ambiente confirmado, evidencias, comandos efetivamente executados, comandos apenas propostos, riscos, verificacoes, versao e rollback. Nunca declarar sucesso de operacao que nao foi executada.
+
+## Beta 1.19.0-beta.1
+
+Consultar docs/PROGRESSIVE-PUBLISH.md. Usar somente geracoes imutaveis em laboratorio; nunca apontar clientes de producao ao publicador experimental. A validacao conservadora de manifestos nao substitui o solver do pkg. Nao alterar .latest nativo.

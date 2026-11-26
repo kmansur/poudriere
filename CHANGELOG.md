@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.19.0-beta.1] - 2026-11-26
+
+- Experimental opt-in progressive publisher, native hooks and isolated signed generations.
+- Conservative manifest checks; no production deployment or full solver validation.
+- Disable single-file auto-update in beta; stop on failed jail/ports update and skip pkgclean on bulk failure.
+- Document installation, limitations, tests and rollback in docs/PROGRESSIVE-PUBLISH.md.
+
 ## [1.18] – 2025-07-08
 ### Added
 - Automatic update of the **Poudriere jail** as the first step of the build process:

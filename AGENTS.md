@@ -1,6 +1,6 @@
 # AGENTS.md - Projeto Poudriere
 
-**Versao:** 1.0.0  
+**Versao:** 1.1.0  
 **Data:** 2026-11-26  
 **Escopo:** automacao, compilacao, publicacao e manutencao de pacotes FreeBSD com Poudriere.
 
@@ -122,3 +122,7 @@ Consultar `skills/<nome>/SKILL.md` conforme a tarefa. Ler somente as skills rele
 - `make.conf` anexo contem PHP 8.2, ccache, modo batch e `OPTIONS_UNSET+= X11`, nao necessariamente as opcoes atualmente ativas no host.
 - `poudriere_build.cfg.sample` e `poudriere_build.sh` sao a linha de base v1.18 desta revisao.
 - Nao alterar os arquivos de origem durante a geracao deste conjunto de instrucoes.
+
+## 10. Beta de publicacao progressiva
+
+A branch feature/progressive-publish contem 1.19.0-beta.1. Consultar docs/PROGRESSIVE-PUBLISH.md. Nunca ativar a beta em producao sem homologacao. Nao modificar arquivos nativos do Poudriere. O atualizador de arquivo unico fica bloqueado na beta.

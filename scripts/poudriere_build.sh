@@ -2,12 +2,13 @@
 
 ##############################################################################
 # Script: poudriere_build.sh
-# Version: 1.18
+# Version: 1.19.0-beta.1
 # Author: Karim Mansur
 # Description:
 #   - Automates package builds using Poudriere.
 #   - Supports external config file: ./poudriere_build.cfg
-#   - Script self-updates if AUTOUPDATE=yes.
+#   - Beta: automatic single-file updates are deliberately disabled.
+#   - Optional publication is handled by independent native hooks and worker.
 #   - Parameters:
 #       -j <jail-name>     : jail name (overrides config)
 #       -p <pkglist-name>  : package list file name (overrides config)
@@ -58,23 +59,11 @@ EOF
 }
 
 check_for_update() {
-  [ "$AUTOUPDATE" != "yes" ] && return
-
-  TMPFILE=$(mktemp)
-  if fetch -q -o "$TMPFILE" "$SCRIPT_URL"; then
-    if ! diff -q "$SCRIPT_PATH" "$TMPFILE" >/dev/null 2>&1; then
-      echo "[INFO] Update detected. Updating the script..."
-      cp "$TMPFILE" "$SCRIPT_PATH"
-      chmod +x "$SCRIPT_PATH"
-      echo "[INFO] Script updated. Restarting execution..."
-      exec "$SCRIPT_PATH" "$@"
-    else
-      echo "[INFO] No update available."
-    fi
-  else
-    echo "[ERROR] Failed to check for script update."
+  # Never replace a multi-file beta with the single-file stable updater.
+  if [ "${AUTOUPDATE:-no}" = "yes" ]; then
+    echo "[WARNING] Beta requires a pinned Git checkout; AUTOUPDATE ignored."
   fi
-  rm -f "$TMPFILE"
+  return 0
 }
 
 # Default values (may be overridden by config or CLI)
@@ -142,9 +131,15 @@ execute_build() {
   fi
 
   echo "[INFO] $(date) - Updating jail $JAIL_NAME..." >> "$LOGFILE"
-  /usr/local/bin/poudriere jail -u -j "$JAIL_NAME" >> "$LOGFILE" 2>&1
+  /usr/local/bin/poudriere jail -u -j "$JAIL_NAME" >> "$LOGFILE" 2>&1 || {
+    echo "[ERROR] Jail update failed; build not started." >> "$LOGFILE"
+    return 1
+  }
   echo "[INFO] $(date) - Updating ports tree..." >> "$LOGFILE"
-  /usr/local/bin/poudriere ports -u -p "$PORTS_TREE" >> "$LOGFILE" 2>&1
+  /usr/local/bin/poudriere ports -u -p "$PORTS_TREE" >> "$LOGFILE" 2>&1 || {
+    echo "[ERROR] Ports update failed; build not started." >> "$LOGFILE"
+    return 1
+  }
 
   echo "[INFO] $(date) - Starting package build..." >> "$LOGFILE"
   /usr/local/bin/poudriere bulk -j "$JAIL_NAME" -p "$PORTS_TREE" -f "$PKGLIST" -b latest >> "$LOGFILE" 2>&1
@@ -163,12 +158,16 @@ execute_build() {
   fi
 
   echo "[INFO] $(date) - Cleaning up old packages..." >> "$LOGFILE"
-  /usr/local/bin/poudriere pkgclean -j "$JAIL_NAME" -p "$PORTS_TREE" -f "$PKGLIST" -y >> "$LOGFILE" 2>&1
+  # Do not delete packages after an unsuccessful bulk.
+  if [ "$BUILD_RESULT" -eq 0 ]; then
+    /usr/local/bin/poudriere pkgclean -j "$JAIL_NAME" -p "$PORTS_TREE" -f "$PKGLIST" -y >> "$LOGFILE" 2>&1 || return 1
+  fi
 
   echo "[INFO] $(date) - Removing old logs (older than $LOG_RETENTION_DAYS days)..." >> "$LOGFILE"
   find "$LOGDIR" -type f -name "build-${JAIL_NAME}-*.log" -mtime +$LOG_RETENTION_DAYS -exec rm -f {} \; >> "$LOGFILE" 2>&1
 
-  echo "[INFO] $(date) - Script completed successfully." >> "$LOGFILE"
+  echo "[INFO] $(date) - Script finished with bulk status $BUILD_RESULT." >> "$LOGFILE"
+  return "$BUILD_RESULT"
 }
 
 execute_build

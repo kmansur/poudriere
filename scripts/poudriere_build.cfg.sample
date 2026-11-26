@@ -7,7 +7,7 @@
 EMAIL_RECIPIENT="monitor@domain.com.br"
 
 # Enable or disable script auto-update (yes|no)
-AUTOUPDATE="yes"
+AUTOUPDATE="no"
 
 # Name of the jail to use for building packages
 JAIL_NAME="systembase"
@@ -17,3 +17,6 @@ PKGLIST_NAME="pkglist"
 
 # Number of days to retain build logs
 LOG_RETENTION_DAYS=7
+
+# Beta: progressive publication is configured separately in
+# /usr/local/etc/poudriere-progressive.json (disabled by default).

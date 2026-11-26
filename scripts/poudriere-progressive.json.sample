@@ -1,0 +1,10 @@
+{
+  "enabled": false,
+  "masters": [
+    "14-4-RELEASE-amd64-default"
+  ],
+  "native_root": "/usr/local/poudriere/data/packages",
+  "state_root": "/usr/local/poudriere/data/progressive",
+  "signing_key": "/usr/local/etc/ssl/keys/poudriere.key",
+  "min_free_gib": 20
+}
