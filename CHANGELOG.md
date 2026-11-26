@@ -6,10 +6,14 @@
 - `UPDATE_PORTS_TREE=yes|no` (default `yes`): `no` skips `poudriere ports -u`; the jail is still updated.
 - A `BUILD_MODE` left in an old cfg is ignored with a warning in the log (the serial mode tried on a branch was not kept).
 - `MOVED_ACTION=report|fix` (default `report`): before the bulk, the package list is compared with the `MOVED` file of the ports tree (path from `poudriere ports -l`, or `PORTS_DIR`). Renamed origins (following chains and keeping `@flavor`), removed origins and renames whose target is missing are written to the log and listed in the mail; a notice mail is sent even when nothing was built. With `fix`, renamed origins are rewritten in the list (dated `.bak` backup, comments kept, an origin already listed is commented out instead of duplicated) and saved options of the old origin are copied to the new one in `options` and `*-options` directories when the new one has none. Removed origins and missing targets are only reported.
+- `JAIL_NAME` (and `-j`) accept several jails separated by spaces, built one after the other in the same run under the same lock; the ports tree is updated once. `jail:pkglist` selects another list for that jail. Each jail has its own log and mail; a failing jail does not stop the next ones, but a failed ports tree update stops the run. Exit status is non-zero if any jail failed.
 - All values are validated; defaults keep the 1.19.0 behaviour.
 
+### Documentation
+- INSTALL.md: `MAX_FILES=8192` (2048 broke large builds) and `TMPFS_BLACKLIST` explained (it has no effect with `USE_TMPFS="data"` and takes package names, not origins); installation from a Git checkout with a cfg table and update steps; cron for several jails; how clients trust a self-signed certificate (`PKG_ENV { SSL_CA_CERT_FILE }`) or use a public CA; section numbering and title fixed.
+
 ### Tests
-- `tests/test_build.sh` covers `UPDATE_PORTS_TREE`, an obsolete `BUILD_MODE` in cfg and the `MOVED` report and fix.
+- `tests/test_build.sh` covers `UPDATE_PORTS_TREE`, several jails per run, an obsolete `BUILD_MODE` in cfg and the `MOVED` report and fix.
 
 ## [1.19.0] - 2026-11-26
 

@@ -27,6 +27,6 @@ See the [LICENSE](./LICENSE) file for more information.
 - [Poudriere GitHub](https://github.com/freebsd/poudriere)
 - [Documentação Oficial do FreeBSD](https://docs.freebsd.org/en/books/handbook/)
 
-## Documentantion
+## Documentation
 
 - [Install](/INSTALL.md)

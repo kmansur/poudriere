@@ -22,6 +22,10 @@ case "$1" in
   jail) exit "${JAIL_RC:-0}" ;;
   ports) exit "${PORTS_RC:-0}" ;;
   bulk)
+    # FAIL_JAIL makes the bulk of that jail fail.
+    if [ -n "${FAIL_JAIL:-}" ] && [ "$2" = "-j" ] && [ "$3" = "$FAIL_JAIL" ]; then
+      exit 1
+    fi
     [ "${BUILT:-0}" -eq 1 ] && echo "[00:01:00] Built ports: ports-mgmt/pkg"
     # Record anything poudriere could read from stdin (must be nothing).
     if [ ! -t 0 ] && read -r stolen; then
@@ -177,6 +181,37 @@ run BUILT=1 BUILD_MODE=serial
 check "obsolete BUILD_MODE does not fail" [ "$RC" -eq 0 ]
 check "obsolete BUILD_MODE still runs one bulk" [ "$(grep -c '^bulk' "$CALLS")" -eq 1 ]
 check "obsolete BUILD_MODE warned in log" sh -c "grep -q 'BUILD_MODE=serial is no longer supported' \$(ls -t '$WORK'/log/*.log | head -1)"
+
+# 13. Several jails in one run: ports tree updated once, per-jail lists.
+# runj <jails> [VAR=value...]: like run, with -j (cfg sets JAIL_NAME).
+runj() {
+  jails="$1"
+  shift
+  : > "$CALLS"
+  : > "$MAILS"
+  echo "SENTINEL" | env "$@" "$WORK/script/poudriere_build.sh" -j "$jails" > "$WORK/out" 2>&1
+  RC=$?
+}
+cp "$WORK/etc/pkglist" "$WORK/etc/list15"
+runj "j14 j15:list15" BUILT=1
+check "multi-jail exits 0" [ "$RC" -eq 0 ]
+check "multi-jail updates each jail" [ "$(grep -c '^jail -u' "$CALLS")" -eq 2 ]
+check "multi-jail updates ports once" [ "$(grep -c '^ports -u' "$CALLS")" -eq 1 ]
+check "multi-jail default list for j14" grep -q "^bulk -j j14 .*-f $WORK/etc/pkglist" "$CALLS"
+check "multi-jail own list for j15" grep -q "^bulk -j j15 .*-f $WORK/etc/list15" "$CALLS"
+check "multi-jail one mail per jail" [ "$(grep -c '^Poudriere Build OK' "$MAILS")" -eq 2 ]
+check "multi-jail one log per jail" sh -c "ls '$WORK'/log/build-j15-list15-*.log >/dev/null"
+
+runj "j14 j15" BUILT=1 FAIL_JAIL=j14
+check "failing jail makes run fail" [ "$RC" -ne 0 ]
+check "next jail still built" grep -q "^bulk -j j15" "$CALLS"
+
+runj "j14 j15" BUILT=1 PORTS_RC=1
+check "ports failure fails run" [ "$RC" -ne 0 ]
+check "ports failure skips other jails" sh -c "! grep -q '^jail -u -j j15' '$CALLS'"
+
+runj "j14 bad/name"
+check "invalid name in jail list rejected" [ "$RC" -ne 0 ]
 
 # 15. MOVED handling. Fake ports tree with a MOVED file and target dirs.
 PORTS="$WORK/ports"

@@ -9,7 +9,10 @@ EMAIL_RECIPIENT="monitor@domain.com.br"
 # Enable or disable script auto-update (yes|no)
 AUTOUPDATE="no"
 
-# Name of the jail to use for building packages
+# Jail(s) to build. Several jails separated by spaces are built one after
+# the other in the same run (the ports tree is updated only once). An entry
+# jail:pkglist uses another package list for that jail, e.g.:
+#   JAIL_NAME="14-3-RELEASE-amd64 15-0-RELEASE-amd64:15-pkglist"
 JAIL_NAME="systembase"
 
 # Name of the package list file to use

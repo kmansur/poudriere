@@ -37,14 +37,17 @@ show_help() {
 Usage: $0 [options]
 
 Options:
-  -j <jail>        Jail name (default from config)
+  -j <jails>       Jail name(s), same format as JAIL_NAME (default from config)
   -p <pkglist>     Package list name (default from config)
   -l <days>        Days to keep logs (default from config)
   -h               Show this help message
 
 Variables (from poudriere_build.cfg):
   EMAIL_RECIPIENT         Email recipient for build reports (required)
-  JAIL_NAME               Jail name (default: systembase)
+  JAIL_NAME               Jail name, or several separated by spaces to
+                          build them one after the other in one run; an
+                          entry may be jail:pkglist to use another list
+                          for that jail (default: systembase)
   PKGLIST_NAME            Package list file name (default: pkglist)
   PORTS_TREE              Ports tree name (default: default)
   UPDATE_PORTS_TREE       yes|no: run 'poudriere ports -u' before building
@@ -109,12 +112,22 @@ done
 : "${EMAIL_RECIPIENT:?EMAIL_RECIPIENT is not set. Check poudriere_build.cfg}"
 
 # Names are used in file paths and patterns; accept only safe characters.
-for value in "$JAIL_NAME" "$PKGLIST_NAME" "$PORTS_TREE"; do
-  case "$value" in
+check_name() {
+  case "$1" in
     ''|-*|*[!A-Za-z0-9._-]*)
-      echo "[ERROR] Invalid jail, package list or ports tree name: '$value'" >&2
+      echo "[ERROR] Invalid jail, package list or ports tree name: '$1'" >&2
       exit 1
       ;;
+  esac
+}
+check_name "$PKGLIST_NAME"
+check_name "$PORTS_TREE"
+[ -n "$(echo $JAIL_NAME)" ] || check_name ""
+for entry in $JAIL_NAME; do
+  case "$entry" in
+    *:*:*) check_name "$entry" ;;
+    *:*) check_name "${entry%%:*}"; check_name "${entry#*:}" ;;
+    *) check_name "$entry" ;;
   esac
 done
 
@@ -163,9 +176,11 @@ if [ "$INTERNAL" -ne 1 ]; then
   exit "$rc"
 fi
 
-PKGLIST="${POUDRIERE_ETC}/${PKGLIST_NAME}"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-LOGFILE="${LOGDIR}/build-${JAIL_NAME}-${PKGLIST_NAME}-${TIMESTAMP}.log"
+JAILS="$JAIL_NAME"
+DEFAULT_PKGLIST_NAME="$PKGLIST_NAME"
+# pending until the ports tree was updated once in this run; done or failed after.
+PORTS_STATE=pending
 
 mkdir -p "$LOGDIR" || exit 1
 
@@ -200,25 +215,9 @@ notify() {
   rm -f "$body"
 }
 
-# Report of moved/removed origins for this run (see check_moved).
+# Report of moved/removed origins for the current jail (see check_moved).
 MOVED_REPORT=$(mktemp) || exit 1
 trap 'rm -f "$MOVED_REPORT"' EXIT
-
-if [ ! -f "$PKGLIST" ]; then
-  log "[ERROR]" "Package list file not found: $PKGLIST"
-  notify "ERROR during Poudriere Build - $JAIL_NAME" "Package list file not found: $PKGLIST"
-  exit 1
-fi
-
-if [ -n "${BUILD_MODE:-}" ] && [ "$BUILD_MODE" != "bulk" ]; then
-  # BUILD_MODE (serial) was removed; old cfg files must keep working.
-  log "[WARNING]" "BUILD_MODE=$BUILD_MODE is no longer supported and is ignored; using one bulk."
-fi
-
-if [ "${AUTOUPDATE:-no}" = "yes" ]; then
-  # The single-file updater cannot update a multi-file release.
-  log "[WARNING]" "AUTOUPDATE is ignored since 1.19; update from a Git checkout."
-fi
 
 # Path of the ports tree: PORTS_DIR from cfg, else the last column of
 # 'poudriere ports -l -q' for PORTS_TREE (the timestamp column has spaces).
@@ -357,6 +356,22 @@ fix_moved() {
 }
 
 execute_build() {
+  if [ ! -f "$PKGLIST" ]; then
+    log "[ERROR]" "Package list file not found: $PKGLIST"
+    notify "ERROR during Poudriere Build - $JAIL_NAME" "Package list file not found: $PKGLIST"
+    return 1
+  fi
+
+  if [ -n "${BUILD_MODE:-}" ] && [ "$BUILD_MODE" != "bulk" ]; then
+    # BUILD_MODE (serial) was removed; old cfg files must keep working.
+    log "[WARNING]" "BUILD_MODE=$BUILD_MODE is no longer supported and is ignored; using one bulk."
+  fi
+
+  if [ "${AUTOUPDATE:-no}" = "yes" ]; then
+    # The single-file updater cannot update a multi-file release.
+    log "[WARNING]" "AUTOUPDATE is ignored since 1.19; update from a Git checkout."
+  fi
+
   # Match the exact jail name, not a prefix (jail "14" must not match "142").
   PIDS=$(pgrep -f "poudriere.*bulk.*-j ${JAIL_NAME}( |\$)")
   if [ -n "$PIDS" ]; then
@@ -371,13 +386,18 @@ execute_build() {
     return 1
   fi
 
-  if [ "$UPDATE_PORTS_TREE" = "yes" ]; then
+  # The tree is shared by every jail of the run: update it only once.
+  if [ "$UPDATE_PORTS_TREE" = "yes" ] && [ "$PORTS_STATE" = "done" ]; then
+    log "[INFO]" "Ports tree $PORTS_TREE already updated in this run."
+  elif [ "$UPDATE_PORTS_TREE" = "yes" ]; then
     log "[INFO]" "Updating ports tree $PORTS_TREE..."
     if ! "$POUDRIERE" ports -u -p "$PORTS_TREE" >> "$LOGFILE" 2>&1; then
+      PORTS_STATE=failed
       log "[ERROR]" "Ports update failed; build not started."
       notify "ERROR during Poudriere Build - $JAIL_NAME" "Ports tree update failed; build not started."
       return 1
     fi
+    PORTS_STATE=done
   else
     log "[INFO]" "UPDATE_PORTS_TREE=no; keeping ports tree $PORTS_TREE as is."
   fi
@@ -430,4 +450,24 @@ execute_build() {
   return "$STATUS"
 }
 
-execute_build
+# Build each jail in turn. A failing jail does not stop the next ones,
+# except when the shared ports tree could not be updated.
+OVERALL=0
+for entry in $JAILS; do
+  JAIL_NAME="${entry%%:*}"
+  PKGLIST_NAME="$DEFAULT_PKGLIST_NAME"
+  case "$entry" in
+    *:*) PKGLIST_NAME="${entry#*:}" ;;
+  esac
+  PKGLIST="${POUDRIERE_ETC}/${PKGLIST_NAME}"
+  LOGFILE="${LOGDIR}/build-${JAIL_NAME}-${PKGLIST_NAME}-${TIMESTAMP}.log"
+  : > "$MOVED_REPORT"
+  if ! execute_build; then
+    OVERALL=1
+  fi
+  if [ "$PORTS_STATE" = "failed" ]; then
+    logger -t poudriere_build "Ports tree update failed; remaining jails skipped"
+    break
+  fi
+done
+exit "$OVERALL"

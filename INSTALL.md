@@ -1,5 +1,5 @@
 # Technical Documentation: 
-**Poudriere with FreeBSD 15.0-CURRENT Jail + NGINX + ccache**
+**Poudriere with FreeBSD 14.x/15.x Jails + NGINX + ccache**
 
 **Version: 1.0 — Official Base of the Poudriere Net Tech Project**
 
@@ -169,14 +169,20 @@ USE_PORTLINT=no
 # Use tmpfs for the build data area (faster, uses RAM)
 USE_TMPFS="data" 
 
-# Do not use tmpfs for port lang/rust (avoid RAM/IO issues for this heavy port)
-TMPFS_BLACKLIST="lang/rust"
+# TMPFS_BLACKLIST only matters when the work directories (wrkdir) are on
+# tmpfs. With USE_TMPFS="data" they are not, so it is not needed. If you use
+# USE_TMPFS=yes or "wrkdir data", list package names (not origins) and set
+# the directory used instead of tmpfs, for example:
+#   TMPFS_BLACKLIST="rust llvm*"
+#   TMPFS_BLACKLIST_TMPDIR=${BASEFS}/data/cache/tmp
 
 # ZFS pool used by poudriere for datasets (jails, data, etc.)
 ZPOOL=zroot
 
-# Max file descriptors (ulimit -n) inside builds
-MAX_FILES=2048
+# Max file descriptors (ulimit -n) inside builds. The Poudriere default is
+# 8192; lower values break large builds (rust, node, llvm) with
+# "Too many open files".
+MAX_FILES=8192
 
 # Update the repository in an atomic way (swap repo only when the new set is ready)
 ATOMIC_PACKAGE_REPOSITORY=yes
@@ -371,29 +377,58 @@ poudriere bulk -j 14-3-RELEASE-amd64 -p default -f /usr/local/etc/poudriere.d/14
 ```
 ---
 
-## 13. Download script and automate with Cron
+## 13. Install the build script and automate with cron
 
-### 13.1. Download script
+### 13.1. Install the script from Git
+
+> A Git checkout makes updates and rollbacks simple (`git pull`, `git checkout v1.18`). Since 1.19 the script does not update itself (AUTOUPDATE is ignored).
 
 ```sh
+pkg install -y git-lite
+git clone https://github.com/kmansur/poudriere /usr/local/src/poudriere
 mkdir -p /usr/local/scripts
-cd /usr/local/scripts
-fetch https://raw.githubusercontent.com/kmansur/poudriere/main/scripts/poudriere_build.sh
-fetch https://raw.githubusercontent.com/kmansur/poudriere/main/scripts/poudriere_build.cfg.sample
-chmod 755 poudriere_build.sh
+install -m 0755 /usr/local/src/poudriere/scripts/poudriere_build.sh /usr/local/scripts/
 # Create the configuration only if it does not exist yet, then edit it
-test -e poudriere_build.cfg || cp poudriere_build.cfg.sample poudriere_build.cfg
-vi poudriere_build.cfg
+test -e /usr/local/scripts/poudriere_build.cfg || \
+    install -m 0640 /usr/local/src/poudriere/scripts/poudriere_build.cfg.sample /usr/local/scripts/poudriere_build.cfg
+vi /usr/local/scripts/poudriere_build.cfg
 ```
 
-> Since 1.19 the script no longer updates itself (AUTOUPDATE is ignored). To update, repeat the `fetch` of `poudriere_build.sh` (or use a Git checkout); `poudriere_build.cfg` is never overwritten. The previous version is available in the `v1.18` tag.
+Main settings in `poudriere_build.cfg` (see the sample for all of them):
 
+| Variable | Default | Use |
+|---|---|---|
+| `EMAIL_RECIPIENT` | (required) | Report recipient |
+| `JAIL_NAME` | `systembase` | One jail, or several separated by spaces, built one after the other in the same run (the ports tree is updated once). `jail:pkglist` uses another list for that jail, e.g. `"14-3-RELEASE-amd64 15-0-RELEASE-amd64:15-pkglist"` |
+| `PKGLIST_NAME` | `pkglist` | List in `/usr/local/etc/poudriere.d/` |
+| `PORTS_TREE` | `default` | Ports tree; one lock per tree |
+| `UPDATE_PORTS_TREE` | `yes` | `no` keeps the tree as is |
+| `MOVED_ACTION` | `report` | Origins renamed/removed in the tree `MOVED` file: `report` lists them in the mail, `fix` also rewrites the list (with `.bak`) and copies saved options |
+| `LOG_RETENTION_DAYS` | `7` | Script logs kept |
 
-### 13.2. Automates the build process by running the script periodically without manual intervention.
-> 
+Test once by hand and check the mail and the exit status:
+
+```sh
+/usr/local/scripts/poudriere_build.sh; echo "exit: $?"
+```
+
+To update later:
+
+```sh
+cd /usr/local/src/poudriere && git pull
+install -m 0755 scripts/poudriere_build.sh /usr/local/scripts/
+```
+
+### 13.2. Automate with cron
+
+> One entry builds every jail listed in `JAIL_NAME`. A run that finds the previous one still working is skipped and logged to syslog, so an hourly schedule is safe.
+
 ```cron
 0 * * * * /usr/local/scripts/poudriere_build.sh
 ```
+
+Check that no jail is left out: `poudriere jail -l` should list only jails present in `JAIL_NAME` (or in another cron entry).
+
 ---
 
 ## 14. Access the Repository via Browser
@@ -401,7 +436,7 @@ vi poudriere_build.cfg
 > Allows users and clients to browse available packages and logs through a standard web browser.
 
 ```
-http://pkg.domain.com.br/
+https://pkg.domain.com.br/
 ```
 ---
 
@@ -429,7 +464,28 @@ poudriere: {
 }
 ```
 
-### 14.5. Test
+### 15.3. Trust the server certificate (self-signed only)
+
+`pkg` verifies the HTTPS certificate. With the self-signed certificate from section 8.2, `pkg update` fails with a certificate error unless the client trusts it. Choose one:
+
+- **Recommended:** use a certificate from a public CA (for example Let's Encrypt with `security/py-certbot` or `security/acme.sh`). Clients need nothing else.
+- **Self-signed / internal CA:** copy the server certificate to each client and point `pkg` at it:
+
+```sh
+# On the client
+scp root@pkg.domain.com.br:/usr/local/etc/nginx/ssl/pkg.domain.com.br.pem /usr/local/etc/ssl/certs/pkg-server.pem
+vi /usr/local/etc/pkg.conf
+```
+
+```conf
+PKG_ENV {
+  SSL_CA_CERT_FILE: "/usr/local/etc/ssl/certs/pkg-server.pem"
+}
+```
+
+The certificate must have been generated with the host name used in the repository URL (`CN`/`subjectAltName`), and it must be copied again when it is renewed (the sample is valid for 365 days).
+
+### 15.4. Test
 
 ```sh
 pkg update -f
