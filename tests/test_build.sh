@@ -1,5 +1,5 @@
 #!/bin/sh
-# Version: 1.19.0
+# Version: 1.20.0
 # Tests for scripts/poudriere_build.sh with mocks of poudriere, mail and,
 # when missing (non FreeBSD hosts), lockf. Nothing outside a temporary
 # directory is touched. Usage: sh tests/test_build.sh
@@ -12,7 +12,7 @@ FAILURES=0
 mkdir -p "$WORK/bin" "$WORK/etc" "$WORK/log" "$WORK/run" "$WORK/script"
 cp "$SRC" "$WORK/script/poudriere_build.sh"
 chmod 755 "$WORK/script/poudriere_build.sh"
-echo "ports-mgmt/pkg" > "$WORK/etc/pkglist"
+printf '%s\n' "ports-mgmt/pkg" "# comment line" "" "  www/nginx  # trailing comment" "sysutils/tmux" > "$WORK/etc/pkglist"
 
 # Mock poudriere: records each call; behaviour is driven by environment.
 cat > "$WORK/bin/poudriere" <<'EOF'
@@ -22,7 +22,16 @@ case "$1" in
   jail) exit "${JAIL_RC:-0}" ;;
   ports) exit "${PORTS_RC:-0}" ;;
   bulk)
-    [ "${BUILT:-0}" -eq 1 ] && echo "[00:01:00] Built ports: ports-mgmt/pkg"
+    # Serial mode passes the origin as the last argument.
+    for last in "$@"; do :; done
+    if [ -n "${FAIL_ORIGIN:-}" ] && [ "$last" = "$FAIL_ORIGIN" ]; then
+      exit 1
+    fi
+    [ "${BUILT:-0}" -eq 1 ] && echo "[00:01:00] Built ports: $last"
+    # Record anything poudriere could read from stdin (must be nothing).
+    if [ ! -t 0 ] && read -r stolen; then
+      echo "stdin leaked: $stolen" >> "$CALLS"
+    fi
     exit "${BULK_RC:-0}"
     ;;
   pkgclean) exit "${PKGCLEAN_RC:-0}" ;;
@@ -76,7 +85,8 @@ EOF
 run() {
   : > "$CALLS"
   : > "$MAILS"
-  env "$@" "$WORK/script/poudriere_build.sh" > "$WORK/out" 2>&1
+  # stdin carries a sentinel line: a bulk that reads stdin is detected.
+  echo "SENTINEL" | env "$@" "$WORK/script/poudriere_build.sh" > "$WORK/out" 2>&1
   RC=$?
 }
 
@@ -151,6 +161,42 @@ check "nothing ran for invalid arguments" [ ! -s "$CALLS" ]
 run BUILT=1
 "$WORK/script/poudriere_build.sh" -j otherjail > /dev/null 2>&1
 check "-j overrides cfg" grep -q "bulk -j otherjail" "$CALLS"
+
+# 10. UPDATE_PORTS_TREE=no skips ports -u; invalid value rejected.
+run BUILT=1 UPDATE_PORTS_TREE=no
+check "UPDATE_PORTS_TREE=no exits 0" [ "$RC" -eq 0 ]
+check "UPDATE_PORTS_TREE=no skips ports -u" sh -c "! grep -q '^ports -u' '$CALLS'"
+check "jail still updated" grep -q "^jail -u" "$CALLS"
+run UPDATE_PORTS_TREE=maybe
+check "invalid UPDATE_PORTS_TREE rejected" [ "$RC" -ne 0 ]
+check "nothing ran for invalid UPDATE_PORTS_TREE" [ ! -s "$CALLS" ]
+
+# 11. Default stays one bulk with -f (1.19 behaviour).
+run BUILT=1
+check "default mode runs one bulk" [ "$(grep -c '^bulk' "$CALLS")" -eq 1 ]
+check "default mode uses -f list" grep -q "^bulk .*-f $WORK/etc/pkglist" "$CALLS"
+check "default mode updates ports" grep -q "^ports -u" "$CALLS"
+
+# 12. BUILD_MODE=serial: one bulk per origin, comments ignored, pkgclean once.
+run BUILT=1 BUILD_MODE=serial
+check "serial exits 0" [ "$RC" -eq 0 ]
+check "serial runs one bulk per origin" [ "$(grep -c '^bulk' "$CALLS")" -eq 3 ]
+check "serial bulk for www/nginx" grep -q "^bulk .* www/nginx$" "$CALLS"
+check "serial never uses -f in bulk" sh -c "! grep -q '^bulk .*-f' '$CALLS'"
+check "serial does not leak stdin" sh -c "! grep -q 'stdin leaked' '$CALLS'"
+check "serial runs pkgclean once" [ "$(grep -c '^pkgclean' "$CALLS")" -eq 1 ]
+check "serial sends OK mail" grep -q "Poudriere Build OK" "$MAILS"
+
+# 13. Serial with one failing origin: others still built, failure reported.
+run BUILT=1 BUILD_MODE=serial FAIL_ORIGIN=www/nginx
+check "serial failure exits non-zero" [ "$RC" -ne 0 ]
+check "serial continues after failure" grep -q "^bulk .* sysutils/tmux$" "$CALLS"
+check "serial failure names origin" grep -q "bulk failed for: www/nginx" "$MAILS"
+check "serial failure skips pkgclean" sh -c "! grep -q '^pkgclean' '$CALLS'"
+
+# 14. Invalid BUILD_MODE rejected.
+run BUILD_MODE=parallel
+check "invalid BUILD_MODE rejected" [ "$RC" -ne 0 ]
 
 if [ "$FAILURES" -ne 0 ]; then
   echo "$FAILURES test(s) failed"

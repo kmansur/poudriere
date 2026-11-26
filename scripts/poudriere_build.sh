@@ -2,7 +2,7 @@
 
 ##############################################################################
 # Script: poudriere_build.sh
-# Version: 1.19.0
+# Version: 1.20.0
 # Author: Karim Mansur
 # Description:
 #   - Automates package builds using Poudriere.
@@ -47,6 +47,12 @@ Variables (from poudriere_build.cfg):
   JAIL_NAME               Jail name (default: systembase)
   PKGLIST_NAME            Package list file name (default: pkglist)
   PORTS_TREE              Ports tree name (default: default)
+  UPDATE_PORTS_TREE       yes|no: run 'poudriere ports -u' before building
+                          (default: yes)
+  BUILD_MODE              bulk|serial (default: bulk)
+                            bulk   : one bulk with the whole list
+                            serial : one bulk per origin of the list; the
+                                     repository is committed after each one
   LOG_RETENTION_DAYS      Days to keep logs (default: 7)
   AUTOUPDATE              Ignored since 1.19 (update from a Git checkout)
 EOF
@@ -73,6 +79,8 @@ fi
 : "${PKGLIST_NAME:=pkglist}"
 : "${PORTS_TREE:=default}"
 : "${LOG_RETENTION_DAYS:=7}"
+: "${UPDATE_PORTS_TREE:=yes}"
+: "${BUILD_MODE:=bulk}"
 
 # Parse options. -i is internal: it marks the run already holding the lock.
 INTERNAL=0
@@ -109,6 +117,22 @@ done
 case "$LOG_RETENTION_DAYS" in
   ''|*[!0-9]*)
     echo "[ERROR] Log retention must be a whole number of days: '$LOG_RETENTION_DAYS'" >&2
+    exit 1
+    ;;
+esac
+
+case "$UPDATE_PORTS_TREE" in
+  yes|no) ;;
+  *)
+    echo "[ERROR] UPDATE_PORTS_TREE must be yes or no: '$UPDATE_PORTS_TREE'" >&2
+    exit 1
+    ;;
+esac
+
+case "$BUILD_MODE" in
+  bulk|serial) ;;
+  *)
+    echo "[ERROR] BUILD_MODE must be bulk or serial: '$BUILD_MODE'" >&2
     exit 1
     ;;
 esac
@@ -178,6 +202,31 @@ if [ "${AUTOUPDATE:-no}" = "yes" ]; then
   log "[WARNING]" "AUTOUPDATE is ignored since 1.19; update from a Git checkout."
 fi
 
+# Serial mode: one bulk per origin, in list order. Each bulk commits the
+# repository (and runs the pkgrepo hooks), so every finished port is
+# published without waiting for the whole list. A failure does not stop
+# the remaining origins; the run fails at the end and lists them.
+# Blank lines and '#' comments in the list are ignored.
+run_serial() {
+  total=$(grep -cvE '^[[:space:]]*(#|$)' "$PKGLIST")
+  count=0
+  failures=0
+  # Read the list on descriptor 3 so poudriere cannot consume it from stdin.
+  while IFS= read -r line <&3 || [ -n "$line" ]; do
+    origin=$(echo "$line" | sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    [ -n "$origin" ] || continue
+    count=$((count + 1))
+    log "[INFO]" "Serial build $count/$total: $origin"
+    if ! "$POUDRIERE" bulk -j "$JAIL_NAME" -p "$PORTS_TREE" -b latest "$origin" >> "$LOGFILE" 2>&1 </dev/null; then
+      log "[ERROR]" "Bulk failed for $origin"
+      FAILED_ORIGINS="$FAILED_ORIGINS $origin"
+      failures=$((failures + 1))
+    fi
+  done 3< "$PKGLIST"
+  log "[INFO]" "Serial build finished: $count origins, $failures failed."
+  [ "$failures" -eq 0 ]
+}
+
 execute_build() {
   # Match the exact jail name, not a prefix (jail "14" must not match "142").
   PIDS=$(pgrep -f "poudriere.*bulk.*-j ${JAIL_NAME}( |\$)")
@@ -193,18 +242,28 @@ execute_build() {
     return 1
   fi
 
-  log "[INFO]" "Updating ports tree $PORTS_TREE..."
-  if ! "$POUDRIERE" ports -u -p "$PORTS_TREE" >> "$LOGFILE" 2>&1; then
-    log "[ERROR]" "Ports update failed; build not started."
-    notify "ERROR during Poudriere Build - $JAIL_NAME" "Ports tree update failed; build not started."
-    return 1
+  if [ "$UPDATE_PORTS_TREE" = "yes" ]; then
+    log "[INFO]" "Updating ports tree $PORTS_TREE..."
+    if ! "$POUDRIERE" ports -u -p "$PORTS_TREE" >> "$LOGFILE" 2>&1; then
+      log "[ERROR]" "Ports update failed; build not started."
+      notify "ERROR during Poudriere Build - $JAIL_NAME" "Ports tree update failed; build not started."
+      return 1
+    fi
+  else
+    log "[INFO]" "UPDATE_PORTS_TREE=no; keeping ports tree $PORTS_TREE as is."
   fi
 
-  log "[INFO]" "Starting package build..."
   # Remember where the bulk output starts so only it is searched later.
   BULK_START=$(($(wc -l < "$LOGFILE") + 1))
-  "$POUDRIERE" bulk -j "$JAIL_NAME" -p "$PORTS_TREE" -f "$PKGLIST" -b latest >> "$LOGFILE" 2>&1
-  BUILD_RESULT=$?
+  FAILED_ORIGINS=""
+  if [ "$BUILD_MODE" = "serial" ]; then
+    run_serial
+    BUILD_RESULT=$?
+  else
+    log "[INFO]" "Starting package build (one bulk for the whole list)..."
+    "$POUDRIERE" bulk -j "$JAIL_NAME" -p "$PORTS_TREE" -f "$PKGLIST" -b latest >> "$LOGFILE" 2>&1
+    BUILD_RESULT=$?
+  fi
   STATUS=$BUILD_RESULT
 
   # Poudriere prints "Built ports: ..." when at least one port was built.
@@ -229,7 +288,9 @@ execute_build() {
 
   log "[INFO]" "Script finished: bulk status $BUILD_RESULT, overall status $STATUS."
 
-  if [ "$BUILD_RESULT" -ne 0 ]; then
+  if [ "$BUILD_RESULT" -ne 0 ] && [ -n "$FAILED_ORIGINS" ]; then
+    notify "ERROR during Poudriere Build - $JAIL_NAME" "Serial build: bulk failed for:$FAILED_ORIGINS"
+  elif [ "$BUILD_RESULT" -ne 0 ]; then
     notify "ERROR during Poudriere Build - $JAIL_NAME" "Bulk failed with status $BUILD_RESULT."
   elif [ "$STATUS" -ne 0 ]; then
     notify "ERROR during Poudriere Build - $JAIL_NAME" "Bulk succeeded but pkgclean failed."

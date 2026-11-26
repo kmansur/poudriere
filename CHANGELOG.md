@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.20.0] - 2026-11-26
+
+### Added
+- `UPDATE_PORTS_TREE=yes|no` (default `yes`): `no` skips `poudriere ports -u`; the jail is still updated.
+- `BUILD_MODE=bulk|serial` (default `bulk`): `serial` runs one `poudriere bulk` per origin of the list, in order, so the repository is committed (and published) after each origin. A failing origin does not stop the others; the run fails at the end, the error mail lists the failed origins and `pkgclean` is skipped, as in bulk mode. Blank lines and `#` comments in the list are ignored.
+- Both values are validated; defaults keep the 1.19.0 behaviour.
+
+### Tests
+- `tests/test_build.sh` covers both options, list comments, a failing origin in serial mode and that poudriere never reads the list from stdin.
+
 ## [1.19.0] - 2026-11-26
 
 Release of 1.19.0-beta.2 (below) as stable. Previous release: tag v1.18.

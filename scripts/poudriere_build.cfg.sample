@@ -18,6 +18,18 @@ PKGLIST_NAME="pkglist"
 # Name of the ports tree (one lock per tree: jails sharing it never overlap)
 #PORTS_TREE="default"
 
+# Update the ports tree (poudriere ports -u) before each build (yes|no).
+# Use "no" to keep the current tree, e.g. until the binary catalogue used
+# by -b latest catches up.
+#UPDATE_PORTS_TREE="yes"
+
+# Build mode (bulk|serial):
+#   bulk   : one bulk with the whole list (default)
+#   serial : one bulk per origin, in list order; the repository is
+#            committed after each origin, so finished ports are published
+#            without waiting for the whole list. Slower overall.
+#BUILD_MODE="bulk"
+
 # Number of days to retain build logs
 LOG_RETENTION_DAYS=7
 
