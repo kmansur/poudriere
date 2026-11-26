@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Version: 1.19.0-beta.2
+# Version: 1.19.0
 # Unit tests for the experimental publisher. They run anywhere with Python
 # 3.11+: tar, pkg and the native Poudriere tree are replaced by fakes.
 import errno

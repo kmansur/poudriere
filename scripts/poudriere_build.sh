@@ -2,14 +2,16 @@
 
 ##############################################################################
 # Script: poudriere_build.sh
-# Version: 1.19.0-beta.2
+# Version: 1.19.0
 # Author: Karim Mansur
 # Description:
 #   - Automates package builds using Poudriere.
 #   - Supports external config file poudriere_build.cfg, read from the same
 #     directory as this script (not from the current directory).
-#   - Beta: automatic single-file updates are deliberately disabled.
-#   - Optional publication is handled by independent native hooks and worker.
+#   - Since 1.19 automatic single-file updates are disabled; update from a
+#     pinned Git checkout instead.
+#   - Optional (experimental) progressive publication is handled by
+#     independent native hooks and worker.
 #   - Parameters:
 #       -j <jail-name>     : jail name (overrides config)
 #       -p <pkglist-name>  : package list file name (overrides config)
@@ -46,7 +48,7 @@ Variables (from poudriere_build.cfg):
   PKGLIST_NAME            Package list file name (default: pkglist)
   PORTS_TREE              Ports tree name (default: default)
   LOG_RETENTION_DAYS      Days to keep logs (default: 7)
-  AUTOUPDATE              Ignored in the beta (pinned Git checkout required)
+  AUTOUPDATE              Ignored since 1.19 (update from a Git checkout)
 EOF
 }
 
@@ -172,8 +174,8 @@ if [ ! -f "$PKGLIST" ]; then
 fi
 
 if [ "${AUTOUPDATE:-no}" = "yes" ]; then
-  # Never replace a multi-file beta with the single-file stable updater.
-  log "[WARNING]" "Beta requires a pinned Git checkout; AUTOUPDATE ignored."
+  # The single-file updater cannot update a multi-file release.
+  log "[WARNING]" "AUTOUPDATE is ignored since 1.19; update from a Git checkout."
 fi
 
 execute_build() {

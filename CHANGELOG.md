@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.19.0] - 2026-11-26
+
+Release of 1.19.0-beta.2 (below) as stable. Previous release: tag v1.18.
+- poudriere_build.sh: all fixes from beta.1 and beta.2; AUTOUPDATE is ignored from now on, so hosts that reach 1.19 through the 1.18 auto-updater stop updating themselves; update from a Git checkout.
+- Progressive publisher (hooks, worker): still experimental and disabled by default; requires laboratory validation before use (docs/PROGRESSIVE-PUBLISH.md).
+
 ## [1.19.0-beta.2] - 2026-11-26
 
 Script (poudriere_build.sh):

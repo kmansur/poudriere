@@ -1,5 +1,5 @@
 #!/bin/sh
-# Version: 1.19.0-beta.2
+# Version: 1.19.0
 # Tests for scripts/poudriere_build.sh with mocks of poudriere, mail and,
 # when missing (non FreeBSD hosts), lockf. Nothing outside a temporary
 # directory is touched. Usage: sh tests/test_build.sh

@@ -123,6 +123,6 @@ Consultar `skills/<nome>/SKILL.md` conforme a tarefa. Ler somente as skills rele
 - `poudriere_build.cfg.sample` e `poudriere_build.sh` sao a linha de base v1.18 desta revisao.
 - Nao alterar os arquivos de origem durante a geracao deste conjunto de instrucoes.
 
-## 10. Beta de publicacao progressiva
+## 10. Publicacao progressiva (experimental)
 
-A branch feature/progressive-publish contem 1.19.0-beta.2. Consultar docs/PROGRESSIVE-PUBLISH.md. Nunca ativar a beta em producao sem homologacao. Nao modificar arquivos nativos do Poudriere. O atualizador de arquivo unico fica bloqueado na beta.
+A versao 1.19.0 inclui o publicador progressivo experimental, desabilitado por padrao. Consultar docs/PROGRESSIVE-PUBLISH.md. Nunca ativar o publicador em producao sem homologacao. Nao modificar arquivos nativos do Poudriere. O atualizador de arquivo unico (AUTOUPDATE) fica desativado desde a 1.19; atualizar a partir de checkout Git. A versao anterior esta na tag v1.18.

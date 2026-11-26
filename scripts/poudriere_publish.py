@@ -1,6 +1,6 @@
 #!/usr/local/bin/python3
 """Experimental isolated publisher. No writes to native Poudriere directories."""
-# Version: 1.19.0-beta.2
+# Version: 1.19.0
 import errno
 import fcntl
 import hashlib

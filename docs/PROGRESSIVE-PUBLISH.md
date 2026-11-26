@@ -1,4 +1,4 @@
-# Publicacao progressiva - 1.19.0-beta.2
+# Publicacao progressiva (experimental) - 1.19.0
 
 ## Estado experimental
 
@@ -72,7 +72,7 @@ Set enabled=false with vi, remove only the beta cron entry using crontab -e, wai
 
 Retention: to stop any automatic deletion set "retention": {"enabled": false} with vi; nothing already removed comes back, so raise keep_generations/min_age_hours before tests that pin a generation.
 
-Build script 1.19.0-beta.2: the lock is now per ports tree in /var/run (was per jail in /tmp), so two jails sharing a tree do not run at the same time; the second run logs to syslog and exits 0. To roll back, reinstall the previous script from its Git tag or the main branch over the beta copy, keeping the existing poudriere_build.cfg.
+Build script 1.19.0: the lock is now per ports tree in /var/run (was per jail in /tmp), so two jails sharing a tree do not run at the same time; the second run logs to syslog and exits 0. To roll back, reinstall the previous script from the v1.18 Git tag, keeping the existing poudriere_build.cfg.
 
 ## Validation status
 

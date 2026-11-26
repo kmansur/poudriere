@@ -376,11 +376,17 @@ poudriere bulk -j 14-3-RELEASE-amd64 -p default -f /usr/local/etc/poudriere.d/14
 ### 13.1. Download script
 
 ```sh
-mkdir /usr/local/scripts
+mkdir -p /usr/local/scripts
 cd /usr/local/scripts
 fetch https://raw.githubusercontent.com/kmansur/poudriere/main/scripts/poudriere_build.sh
+fetch https://raw.githubusercontent.com/kmansur/poudriere/main/scripts/poudriere_build.cfg.sample
 chmod 755 poudriere_build.sh
+# Create the configuration only if it does not exist yet, then edit it
+test -e poudriere_build.cfg || cp poudriere_build.cfg.sample poudriere_build.cfg
+vi poudriere_build.cfg
 ```
+
+> Since 1.19 the script no longer updates itself (AUTOUPDATE is ignored). To update, repeat the `fetch` of `poudriere_build.sh` (or use a Git checkout); `poudriere_build.cfg` is never overwritten. The previous version is available in the `v1.18` tag.
 
 
 ### 13.2. Automates the build process by running the script periodically without manual intervention.
